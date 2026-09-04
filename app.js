@@ -29,6 +29,9 @@ let pendingCoverImage = null;
 
 try { cart = JSON.parse(localStorage.getItem("pm_cart_v1") || "{}"); } catch (e) { cart = {}; }
 
+let cartStep = "items"; // "items" | "form" | "summary"
+let checkoutData = { nombre: "", pago: "", entrega: "", entreCalles: "", localidad: "", provincia: "", cp: "", telefono: "", dni: "", notas: "" };
+
 // ---------- Helpers ----------
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -180,41 +183,201 @@ function addToCart(id, qty) { cart[id] = (cart[id] || 0) + qty; saveCart(); rend
 function setQty(id, qty) { if (qty <= 0) delete cart[id]; else cart[id] = qty; saveCart(); renderCart(); }
 
 function renderCart() {
-  const badge = $("#cart-badge");
+  // floating bottom bar
   const count = cartCount();
-  badge.textContent = count;
-  badge.hidden = count === 0;
+  const fc = $("#floating-cart");
+  fc.hidden = count === 0;
+  $("#fc-count").textContent = count + (count === 1 ? " item" : " items");
+  $("#fc-total").textContent = fmtARS(cartTotal());
 
-  const body = $("#cart-body");
-  const lines = cartLines();
-  if (lines.length === 0) {
-    body.innerHTML = `<p style="color:var(--muted);font-size:.9rem;">Todavía no agregaste productos.</p>`;
-  } else {
-    body.innerHTML = lines.map(l => `
-      <div class="cart-line" data-id="${l.item.id}">
-        <img src="${l.item.img}" alt="">
-        <div class="info">
-          <h4>${escapeHtml(l.item.title)}</h4>
-          <div class="p">${l.qty} x ${fmtARS(l.item.price)} = ${fmtARS(l.qty * l.item.price)}</div>
-          <button class="remove" data-remove>Quitar</button>
-        </div>
-      </div>`).join("");
-    body.querySelectorAll("[data-remove]").forEach(btn => {
-      btn.onclick = () => setQty(btn.closest(".cart-line").dataset.id, 0);
-    });
-  }
-  $("#cart-total").textContent = fmtARS(cartTotal());
-  $("#wa-btn").href = waOrderLink();
-  // also refresh grid prices if product data changed live
+  renderCartDrawer();
 }
+
+function openCartDrawer(step) {
+  if (step) cartStep = step;
+  $("#cart-overlay").classList.add("open");
+  $("#cart-drawer").classList.add("open");
+  renderCartDrawer();
+}
+function closeCartDrawer() {
+  $("#cart-overlay").classList.remove("open");
+  $("#cart-drawer").classList.remove("open");
+}
+
+function renderCartDrawer() {
+  const backBtn = $("#cart-back-btn");
+  const title = $("#cart-drawer-title");
+  const body = $("#cart-drawer-body");
+  const foot = $("#cart-drawer-foot");
+  const lines = cartLines();
+
+  if (cartStep === "items") {
+    backBtn.hidden = true;
+    title.textContent = "Tu pedido";
+    if (lines.length === 0) {
+      body.innerHTML = `<p style="color:var(--muted);font-size:.9rem;">Todavía no agregaste productos.</p>`;
+    } else {
+      body.innerHTML = lines.map(l => `
+        <div class="cart-line" data-id="${l.item.id}">
+          <img src="${l.item.img}" alt="">
+          <div class="info">
+            <h4>${escapeHtml(l.item.title)}</h4>
+            <div class="p">${l.qty} x ${fmtARS(l.item.price)} = ${fmtARS(l.qty * l.item.price)}</div>
+            <button class="remove" data-remove>Quitar</button>
+          </div>
+        </div>`).join("");
+      body.querySelectorAll("[data-remove]").forEach(btn => {
+        btn.onclick = () => setQty(btn.closest(".cart-line").dataset.id, 0);
+      });
+    }
+    foot.innerHTML = `
+      <div class="total-row"><span>Total</span><span>${fmtARS(cartTotal())}</span></div>
+      <button class="wa-btn" id="cart-continue-btn" ${lines.length === 0 ? "disabled" : ""}>Continuar</button>`;
+    $("#cart-continue-btn").onclick = () => {
+      if (cartLines().length === 0) return;
+      cartStep = "form";
+      renderCartDrawer();
+    };
+
+  } else if (cartStep === "form") {
+    backBtn.hidden = false;
+    title.textContent = "Completá tu pedido";
+    const d = checkoutData;
+    body.innerHTML = `
+      <div class="field">
+        <label>Nombre completo *</label>
+        <input type="text" id="co-nombre" value="${escapeAttr(d.nombre)}" maxlength="70">
+      </div>
+      <div class="field">
+        <label>Forma de pago *</label>
+        <div class="radio-group">
+          <label class="radio-opt"><input type="radio" name="co-pago" value="efectivo" ${d.pago === "efectivo" ? "checked" : ""}> Efectivo<span class="hint">El pago se coordina por WhatsApp</span></label>
+          <label class="radio-opt"><input type="radio" name="co-pago" value="transferencia" ${d.pago === "transferencia" ? "checked" : ""}> Transferencia<span class="hint">El pago se coordina por WhatsApp</span></label>
+        </div>
+      </div>
+      <div class="field">
+        <label>Método de entrega *</label>
+        <div class="radio-group">
+          <label class="radio-opt"><input type="radio" name="co-entrega" value="retiro" ${d.entrega === "retiro" ? "checked" : ""}> Retiro en el local</label>
+          <label class="radio-opt"><input type="radio" name="co-entrega" value="domicilio" ${d.entrega === "domicilio" ? "checked" : ""}> Envío a domicilio</label>
+        </div>
+      </div>
+      <div id="co-address-fields" ${d.entrega === "domicilio" ? "" : "hidden"}>
+        <div class="field">
+          <label>Dirección / entre calles *</label>
+          <input type="text" id="co-calles" value="${escapeAttr(d.entreCalles)}" maxlength="70">
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>Localidad *</label>
+            <input type="text" id="co-localidad" value="${escapeAttr(d.localidad)}" maxlength="70">
+          </div>
+          <div class="field">
+            <label>Provincia *</label>
+            <input type="text" id="co-provincia" value="${escapeAttr(d.provincia)}" maxlength="70">
+          </div>
+        </div>
+        <div class="field">
+          <label>Código postal *</label>
+          <input type="text" id="co-cp" value="${escapeAttr(d.cp)}" maxlength="20">
+        </div>
+      </div>
+      <div class="field">
+        <label>Teléfono *</label>
+        <input type="text" id="co-telefono" value="${escapeAttr(d.telefono)}" maxlength="30">
+      </div>
+      <div class="field">
+        <label>DNI</label>
+        <input type="text" id="co-dni" value="${escapeAttr(d.dni)}" maxlength="20">
+      </div>
+      <div class="field">
+        <label>¿Algo más que quieras agregar?</label>
+        <textarea id="co-notas" maxlength="200">${escapeHtml(d.notas)}</textarea>
+      </div>`;
+    $$('input[name="co-entrega"]').forEach(r => {
+      r.onchange = () => { $("#co-address-fields").hidden = $('input[name="co-entrega"]:checked').value !== "domicilio"; };
+    });
+    foot.innerHTML = `<button class="wa-btn" id="checkout-continue-btn">Ver resumen</button>`;
+    $("#checkout-continue-btn").onclick = () => {
+      d.nombre = $("#co-nombre").value.trim();
+      const pagoEl = $('input[name="co-pago"]:checked');
+      const entregaEl = $('input[name="co-entrega"]:checked');
+      d.pago = pagoEl ? pagoEl.value : "";
+      d.entrega = entregaEl ? entregaEl.value : "";
+      d.entreCalles = $("#co-calles").value.trim();
+      d.localidad = $("#co-localidad").value.trim();
+      d.provincia = $("#co-provincia").value.trim();
+      d.cp = $("#co-cp").value.trim();
+      d.telefono = $("#co-telefono").value.trim();
+      d.dni = $("#co-dni").value.trim();
+      d.notas = $("#co-notas").value.trim();
+
+      if (!d.nombre) return toast("Falta tu nombre completo");
+      if (!d.pago) return toast("Elegí una forma de pago");
+      if (!d.entrega) return toast("Elegí un método de entrega");
+      if (d.entrega === "domicilio" && (!d.entreCalles || !d.localidad || !d.provincia || !d.cp)) return toast("Completá los datos de envío");
+      if (!d.telefono) return toast("Falta tu teléfono");
+
+      cartStep = "summary";
+      renderCartDrawer();
+    };
+
+  } else if (cartStep === "summary") {
+    backBtn.hidden = false;
+    title.textContent = "Detalle de tu compra";
+    body.innerHTML = `
+      <div class="summary-status"><span>Estado del pago</span><span class="pill warn">Pendiente</span></div>
+      ${lines.map(l => `
+        <div class="summary-line">
+          <span class="qty">${l.qty}</span>
+          <div class="info"><div class="t">${escapeHtml(l.item.title)}</div><div class="c">${escapeHtml(l.item.category || "")}</div></div>
+          <div class="amt">${fmtARS(l.item.price * l.qty)}</div>
+        </div>`).join("")}
+      <div class="summary-buyer">
+        <div><b>${escapeHtml(checkoutData.nombre)}</b> · ${checkoutData.telefono}</div>
+        <div>${checkoutData.pago === "efectivo" ? "Efectivo" : "Transferencia"} · ${checkoutData.entrega === "retiro" ? "Retiro en el local" : "Envío a domicilio"}</div>
+        ${checkoutData.entrega === "domicilio" ? `<div>${escapeHtml(checkoutData.entreCalles)}, ${escapeHtml(checkoutData.localidad)}, ${escapeHtml(checkoutData.provincia)} (${escapeHtml(checkoutData.cp)})</div>` : ""}
+      </div>`;
+    foot.innerHTML = `
+      <div class="total-row"><span>Total estimado</span><span>${fmtARS(cartTotal())}</span></div>
+      <a id="wa-btn" class="wa-btn" href="${waOrderLink()}" target="_blank" rel="noopener">Completar pedido en WhatsApp</a>`;
+    $("#wa-btn").onclick = () => {
+      setTimeout(() => {
+        cart = {};
+        saveCart();
+        cartStep = "items";
+        checkoutData = { nombre: "", pago: "", entrega: "", entreCalles: "", localidad: "", provincia: "", cp: "", telefono: "", dni: "", notas: "" };
+        renderCart();
+        closeCartDrawer();
+        toast("¡Pedido enviado!");
+      }, 300);
+    };
+  }
+}
+
+$("#cart-back-btn").onclick = () => {
+  cartStep = cartStep === "summary" ? "form" : "items";
+  renderCartDrawer();
+};
+
 function waOrderLink() {
   const number = (settings.whatsapp || "").replace(/\D/g, "");
   const lines = cartLines();
   if (!number) return "#";
-  if (lines.length === 0) return "https://wa.me/" + number;
+  const d = checkoutData;
   let msg = `Hola! Quiero hacer este pedido de ${settings.brand || "Primera Mano"}:\n\n`;
   lines.forEach(l => { msg += `• ${l.item.title} x${l.qty} — ${fmtARS(l.item.price * l.qty)}\n`; });
-  msg += `\nTotal: ${fmtARS(cartTotal())}\n\n¿Está todo disponible?`;
+  msg += `\nTotal: ${fmtARS(cartTotal())}\n\n`;
+  msg += `Nombre: ${d.nombre}\n`;
+  msg += `Forma de pago: ${d.pago === "efectivo" ? "Efectivo" : "Transferencia"}\n`;
+  msg += `Entrega: ${d.entrega === "retiro" ? "Retiro en el local" : "Envío a domicilio"}\n`;
+  if (d.entrega === "domicilio") {
+    msg += `Dirección: ${d.entreCalles}, ${d.localidad}, ${d.provincia} (CP ${d.cp})\n`;
+  }
+  msg += `Teléfono: ${d.telefono}\n`;
+  if (d.dni) msg += `DNI: ${d.dni}\n`;
+  if (d.notas) msg += `Nota: ${d.notas}\n`;
+  msg += `\n¿Está todo disponible?`;
   return `https://wa.me/${number}?text=${encodeURIComponent(msg)}`;
 }
 
@@ -499,9 +662,9 @@ $("#save-config-btn").onclick = async () => {
 // ================================================================
 $("#search-input").oninput = (e) => { searchTerm = e.target.value; renderGrid(); };
 
-$("#cart-btn").onclick = () => { $("#cart-overlay").classList.add("open"); $("#cart-drawer").classList.add("open"); };
-$("#cart-close").onclick = () => { $("#cart-overlay").classList.remove("open"); $("#cart-drawer").classList.remove("open"); };
-$("#cart-overlay").onclick = () => { $("#cart-overlay").classList.remove("open"); $("#cart-drawer").classList.remove("open"); };
+$("#floating-cart-btn").onclick = () => openCartDrawer("items");
+$("#cart-close").onclick = closeCartDrawer;
+$("#cart-overlay").onclick = closeCartDrawer;
 
 $("#pmodal-close").onclick = closeProductModal;
 $("#pmodal-overlay").addEventListener("click", (e) => { if (e.target.id === "pmodal-overlay") closeProductModal(); });

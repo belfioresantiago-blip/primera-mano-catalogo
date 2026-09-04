@@ -21,7 +21,6 @@
       <input id="search-input" class="search-input" type="text" placeholder="Buscar productos...">
     </div>
     <div class="top-actions">
-      <button id="cart-btn" class="icon-btn">🛒 Carrito<span id="cart-badge" class="badge" hidden>0</span></button>
       <div id="auth-slot"></div>
     </div>
   </div>
@@ -42,20 +41,26 @@
 <main class="grid" id="grid"></main>
 <div class="empty-state" id="empty-state" hidden>No encontramos productos con esa búsqueda.</div>
 
-<!-- ================= CART DRAWER ================= -->
+<!-- ================= FLOATING CART BAR ================= -->
+<div class="floating-cart" id="floating-cart" hidden>
+  <button id="floating-cart-btn">
+    <span class="fc-icon">🛒</span>
+    <span class="fc-label">Tu pedido</span>
+    <span class="fc-count" id="fc-count">0 items</span>
+    <span class="fc-total" id="fc-total">$0</span>
+  </button>
+</div>
+
+<!-- ================= CART DRAWER (3 pasos: carrito -> datos -> resumen) ================= -->
 <div class="drawer-overlay" id="cart-overlay"></div>
 <aside class="drawer" id="cart-drawer">
   <div class="drawer-head">
-    <h2>Tu pedido</h2>
+    <button class="drawer-back" id="cart-back-btn" hidden>←</button>
+    <h2 id="cart-drawer-title">Tu pedido</h2>
     <button class="drawer-close" id="cart-close">✕</button>
   </div>
-  <div class="drawer-body" id="cart-body"></div>
-  <div class="drawer-foot">
-    <div class="total-row"><span>Total</span><span id="cart-total">$0</span></div>
-    <a id="wa-btn" class="wa-btn" href="#" target="_blank" rel="noopener">
-      <span>Enviar pedido por WhatsApp</span>
-    </a>
-  </div>
+  <div class="drawer-body" id="cart-drawer-body"></div>
+  <div class="drawer-foot" id="cart-drawer-foot"></div>
 </aside>
 
 <!-- ================= PRODUCT MODAL ================= -->

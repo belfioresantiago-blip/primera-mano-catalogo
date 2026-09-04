@@ -105,7 +105,25 @@ input,select,textarea{font:inherit;}
 .add-btn:active{background:var(--brand-dark);}
 .empty-state{max-width:1180px;margin:60px auto;text-align:center;color:var(--muted);padding:0 20px;}
 
+/* ---------- Floating cart bar ---------- */
+.floating-cart{
+  position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:70;
+  animation:fc-in .2s ease;
+}
+@keyframes fc-in{from{opacity:0;transform:translateX(-50%) translateY(10px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}
+.floating-cart button{
+  display:flex;align-items:center;gap:10px;background:var(--text);color:#fff;
+  border:none;border-radius:999px;padding:12px 18px 12px 16px;
+  box-shadow:0 8px 24px rgba(0,0,0,.25);font-weight:700;font-size:.88rem;
+}
+.floating-cart .fc-icon{font-size:1.05rem;}
+.floating-cart .fc-label{opacity:.75;font-weight:600;}
+.floating-cart .fc-count{background:rgba(255,255,255,.15);padding:3px 9px;border-radius:999px;font-size:.78rem;}
+.floating-cart .fc-total{color:var(--brand);}
+@media (max-width:480px){.floating-cart .fc-label{display:none;}}
+
 /* ---------- Cart drawer ---------- */
+.drawer-back{border:none;background:none;font-size:1.2rem;color:var(--text);margin-right:4px;padding:4px;}
 .drawer-overlay{
   position:fixed;inset:0;background:rgba(10,10,10,.4);z-index:80;
   opacity:0;pointer-events:none;transition:opacity .2s;
@@ -133,8 +151,31 @@ input,select,textarea{font:inherit;}
 .wa-btn{
   display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
   background:#25D366;color:#fff;border:none;border-radius:999px;padding:13px;
-  font-weight:700;font-size:.95rem;
+  font-weight:700;font-size:.95rem;text-decoration:none;
 }
+.wa-btn[disabled]{opacity:.45;pointer-events:none;}
+.wa-btn:not(a){background:var(--brand);}
+a.wa-btn{background:#25D366;}
+
+/* ---------- Checkout form (step 2) ---------- */
+.radio-group{display:flex;flex-direction:column;gap:8px;}
+.radio-opt{
+  display:flex;flex-direction:column;gap:2px;border:1px solid var(--border);border-radius:10px;
+  padding:10px 12px;font-size:.88rem;font-weight:600;cursor:pointer;
+}
+.radio-opt:has(input:checked){border-color:var(--brand);background:#f4faf6;}
+.radio-opt input{margin-right:6px;}
+.radio-opt .hint{font-size:.76rem;font-weight:400;color:var(--muted);margin-left:20px;}
+
+/* ---------- Order summary (step 3) ---------- */
+.summary-status{display:flex;justify-content:space-between;align-items:center;padding-bottom:14px;margin-bottom:10px;border-bottom:1px solid var(--border);font-size:.85rem;font-weight:600;}
+.summary-line{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);}
+.summary-line .qty{flex:none;width:22px;height:22px;border-radius:6px;background:var(--bg);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;}
+.summary-line .info{flex:1;min-width:0;}
+.summary-line .info .t{font-size:.85rem;font-weight:600;}
+.summary-line .info .c{font-size:.75rem;color:var(--muted);}
+.summary-line .amt{font-weight:700;font-size:.85rem;}
+.summary-buyer{margin-top:14px;padding-top:14px;border-top:1px solid var(--border);font-size:.82rem;color:var(--muted);line-height:1.6;}
 
 /* ---------- Product modal ---------- */
 .pmodal-overlay{position:fixed;inset:0;background:rgba(10,10,10,.55);z-index:90;display:none;align-items:center;justify-content:center;padding:20px;}
