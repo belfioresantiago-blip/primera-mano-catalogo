@@ -409,21 +409,32 @@ function openProductModal(id) {
   if (!p) return;
   modalQty = 1;
   const imgs = (p.images && p.images.length ? p.images : [p.imgHi || p.img]).filter(Boolean);
-  $("#pmodal-img").src = imgs[0] || "";
-  const thumbs = $("#pmodal-thumbs");
+  const slider = $("#pmodal-slider");
+  slider.scrollLeft = 0;
+  slider.innerHTML = imgs.map((u) => `<div class="slide"><img src="${u}" alt=""></div>`).join("");
+  const dots = $("#pmodal-dots");
   if (imgs.length > 1) {
-    thumbs.hidden = false;
-    thumbs.innerHTML = imgs.map((u, i) => `<img src="${u}" class="${i === 0 ? "active" : ""}" data-i="${i}">`).join("");
-    thumbs.querySelectorAll("img").forEach(t => {
-      t.onclick = () => {
-        $("#pmodal-img").src = t.src;
-        thumbs.querySelectorAll("img").forEach(x => x.classList.remove("active"));
-        t.classList.add("active");
-      };
+    dots.hidden = false;
+    dots.innerHTML = imgs.map((_, i) => `<span class="${i === 0 ? "active" : ""}" data-i="${i}"></span>`).join("");
+    const dotEls = Array.from(dots.querySelectorAll("span"));
+    const slideEls = Array.from(slider.querySelectorAll(".slide"));
+    dotEls.forEach((d, i) => {
+      d.style.pointerEvents = "auto";
+      d.style.cursor = "pointer";
+      d.onclick = () => slideEls[i].scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
     });
+    let scrollTimer = null;
+    slider.onscroll = () => {
+      clearTimeout(scrollTimer);
+      scrollTimer = setTimeout(() => {
+        const idx = Math.round(slider.scrollLeft / slider.clientWidth);
+        dotEls.forEach((d, i) => d.classList.toggle("active", i === idx));
+      }, 80);
+    };
   } else {
-    thumbs.hidden = true;
-    thumbs.innerHTML = "";
+    dots.hidden = true;
+    dots.innerHTML = "";
+    slider.onscroll = null;
   }
   $("#pmodal-cat").textContent = p.category || "";
   $("#pmodal-title").textContent = p.title || "";
