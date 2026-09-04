@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title id="page-title">Primera Mano</title>
+<meta id="meta-desc" name="description" content="Catálogo de Primera Mano">
+<link id="favicon" rel="icon" href="data:,">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ================= TOP BAR ================= -->
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <img id="brand-logo" src="" alt="" hidden>
+      <span class="brand-name" id="brand-name">Primera Mano</span>
+    </div>
+    <div class="search-wrap">
+      <input id="search-input" class="search-input" type="text" placeholder="Buscar productos...">
+    </div>
+    <div class="top-actions">
+      <div id="auth-slot"></div>
+    </div>
+  </div>
+</header>
+
+<!-- ================= HERO ================= -->
+<section class="hero">
+  <h1 id="hero-title">Primera Mano</h1>
+  <p id="hero-desc">Catálogo de productos. Armá tu pedido y enviálo por WhatsApp.</p>
+</section>
+
+<!-- ================= CATEGORIES ================= -->
+<nav class="cats" id="cats"></nav>
+
+<div class="result-count" id="result-count"></div>
+
+<!-- ================= GRID ================= -->
+<main class="grid" id="grid"></main>
+<div class="empty-state" id="empty-state" hidden>No encontramos productos con esa búsqueda.</div>
+
+<!-- ================= FLOATING CART BAR ================= -->
+<div class="floating-cart" id="floating-cart" hidden>
+  <button id="floating-cart-btn">
+    <span class="fc-icon">🛒</span>
+    <span class="fc-label">Tu pedido</span>
+    <span class="fc-count" id="fc-count">0 items</span>
+    <span class="fc-total" id="fc-total">$0</span>
+  </button>
+</div>
+
+<!-- ================= CART DRAWER (3 pasos: carrito -> datos -> resumen) ================= -->
+<div class="drawer-overlay" id="cart-overlay"></div>
+<aside class="drawer" id="cart-drawer">
+  <div class="drawer-head">
+    <button class="drawer-back" id="cart-back-btn" hidden>←</button>
+    <h2 id="cart-drawer-title">Tu pedido</h2>
+    <button class="drawer-close" id="cart-close">✕</button>
+  </div>
+  <div class="drawer-body" id="cart-drawer-body"></div>
+  <div class="drawer-foot" id="cart-drawer-foot"></div>
+</aside>
+
+<!-- ================= PRODUCT MODAL ================= -->
+<div class="pmodal-overlay" id="pmodal-overlay">
+  <div class="pmodal" id="pmodal">
+    <button class="pmodal-close" id="pmodal-close">✕</button>
+    <div class="media">
+      <img id="pmodal-img" src="" alt="">
+      <div class="pmodal-thumbs" id="pmodal-thumbs" hidden></div>
+    </div>
+    <div class="info">
+      <span class="cat" id="pmodal-cat"></span>
+      <h2 id="pmodal-title"></h2>
+      <div class="price" id="pmodal-price"></div>
+      <p class="desc" id="pmodal-desc"></p>
+      <div class="qty-stepper" id="pmodal-qty">
+        <button data-d="-1">−</button><span>1</span><button data-d="1">+</button>
+      </div>
+      <button class="add-btn" id="pmodal-add" style="padding:12px;">Agregar al pedido</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= ADMIN DRAWER ================= -->
+<div class="drawer-overlay" id="admin-overlay"></div>
+<aside class="admin-drawer" id="admin-drawer">
+  <div class="admin-head">
+    <h2>Editar catálogo</h2>
+    <button class="drawer-close" id="admin-close">✕</button>
+  </div>
+  <div class="admin-tabs">
+    <button class="admin-tab active" data-tab="productos">Productos</button>
+    <button class="admin-tab" data-tab="diseno">Diseño y datos</button>
+  </div>
+
+  <!-- Productos tab -->
+  <div class="admin-body" id="tab-productos">
+    <div id="seed-banner" hidden style="margin-bottom:14px;">
+      <p style="font-size:.85rem;color:var(--muted);">La base de datos está vacía todavía.</p>
+      <button class="btn btn-primary" id="seed-btn">Importar catálogo inicial (531 productos)</button>
+      <p id="seed-progress" style="font-size:.8rem;color:var(--muted);"></p>
+    </div>
+    <button class="btn btn-primary" id="new-product-btn" style="width:100%;margin-bottom:12px;">+ Agregar producto</button>
+    <input class="admin-search" id="admin-search" type="text" placeholder="Buscar en tus productos...">
+    <div id="admin-product-list"></div>
+  </div>
+
+  <!-- Diseño tab -->
+  <div class="admin-body" id="tab-diseno" hidden>
+    <div class="field">
+      <label>Nombre de la marca</label>
+      <input type="text" id="cfg-brand">
+    </div>
+    <div class="field">
+      <label>Descripción del catálogo</label>
+      <textarea id="cfg-desc"></textarea>
+    </div>
+    <div class="field">
+      <label>WhatsApp (solo números, con código de país)</label>
+      <input type="text" id="cfg-whatsapp" placeholder="5491159436724">
+    </div>
+    <div class="field">
+      <label>Logo</label>
+      <div class="img-drop" id="drop-logo">Click para subir logo</div>
+      <img class="img-preview" id="preview-logo" hidden>
+      <input type="file" id="file-logo" accept="image/*" hidden>
+    </div>
+    <div class="field">
+      <label>Imagen de portada</label>
+      <div class="img-drop" id="drop-cover">Click para subir portada</div>
+      <img class="img-preview" id="preview-cover" hidden>
+      <input type="file" id="file-cover" accept="image/*" hidden>
+    </div>
+    <div class="field">
+      <label>Color principal</label>
+      <div class="color-row">
+        <input type="color" id="cfg-color-brand" value="#1f8a4c">
+        <span id="cfg-color-brand-hex" style="font-size:.85rem;color:var(--muted);">#1f8a4c</span>
+      </div>
+    </div>
+    <div class="field">
+      <label>Color de fondo</label>
+      <div class="color-row">
+        <input type="color" id="cfg-color-bg" value="#f7f7f5">
+        <span id="cfg-color-bg-hex" style="font-size:.85rem;color:var(--muted);">#f7f7f5</span>
+      </div>
+    </div>
+    <button class="btn btn-primary" id="save-config-btn" style="width:100%;margin-top:6px;">Guardar cambios</button>
+  </div>
+</aside>
+
+<!-- ================= EDIT / NEW PRODUCT MODAL ================= -->
+<div class="pmodal-overlay" id="edit-overlay">
+  <div class="pmodal" id="edit-modal" style="grid-template-columns:1fr;max-width:520px;">
+    <button class="pmodal-close" id="edit-close">✕</button>
+    <div class="info" style="padding:26px;">
+      <h2 id="edit-title">Producto</h2>
+      <div class="field">
+        <label>Fotos (hasta 4)</label>
+        <div class="img-drop" id="drop-product">Click para subir fotos (hasta 4)</div>
+        <input type="file" id="file-product" accept="image/*" multiple hidden>
+        <div class="photo-strip" id="photo-strip"></div>
+      </div>
+      <div class="field">
+        <label>Nombre</label>
+        <input type="text" id="p-title">
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Categoría</label>
+          <input type="text" id="p-category" list="cat-list">
+          <datalist id="cat-list"></datalist>
+        </div>
+        <div class="field">
+          <label>Precio ($)</label>
+          <input type="number" id="p-price">
+        </div>
+      </div>
+      <div class="field">
+        <label>Descripción</label>
+        <textarea id="p-desc"></textarea>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="p-save" style="flex:1;">Guardar</button>
+        <button class="btn btn-danger" id="p-delete" hidden>Eliminar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
