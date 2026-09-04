@@ -23,7 +23,8 @@ let isAdmin = false;
 let activeCategory = "__all__";
 let searchTerm = "";
 let editingProductId = null; // null = new product
-let pendingProductImage = null; // data URL captured from upload, not yet saved
+let pendingImages = [];       // base64 data-URLs, being edited for the current product (up to 4)
+let uploadTargetId = null;    // product id used when creating a brand-new product
 let pendingLogoImage = null;
 let pendingCoverImage = null;
 
@@ -67,6 +68,26 @@ function fileToDataUrl(file, maxSize, quality) {
     };
     reader.readAsDataURL(file);
   });
+}
+
+// Convierte una foto de producto a un data-URL base64, nítida pero acotada en
+// peso para que hasta 4 fotos por producto entren en el límite de 1MB por
+// documento de Firestore. Prueba tamaños/calidad decrecientes hasta que el
+// resultado quede por debajo de targetBytes (por defecto ~220KB en base64,
+// que para 4 fotos deja el documento en ~900KB, con margen para el resto de
+// los campos).
+async function processProductPhoto(file, targetBytes = 220000) {
+  const steps = [
+    [1280, 0.85], [1280, 0.72], [1024, 0.72], [1024, 0.6],
+    [800, 0.65], [800, 0.5], [640, 0.5], [480, 0.45]
+  ];
+  let last = null;
+  for (const [size, q] of steps) {
+    const dataUrl = await fileToDataUrl(file, size, q);
+    last = dataUrl;
+    if (dataUrl.length <= targetBytes) return dataUrl;
+  }
+  return last; // ya achicado al máximo, se usa igual aunque no llegue al target
 }
 
 // ---------- Theme ----------
@@ -387,7 +408,23 @@ function openProductModal(id) {
   const p = products[id];
   if (!p) return;
   modalQty = 1;
-  $("#pmodal-img").src = p.imgHi || p.img;
+  const imgs = (p.images && p.images.length ? p.images : [p.imgHi || p.img]).filter(Boolean);
+  $("#pmodal-img").src = imgs[0] || "";
+  const thumbs = $("#pmodal-thumbs");
+  if (imgs.length > 1) {
+    thumbs.hidden = false;
+    thumbs.innerHTML = imgs.map((u, i) => `<img src="${u}" class="${i === 0 ? "active" : ""}" data-i="${i}">`).join("");
+    thumbs.querySelectorAll("img").forEach(t => {
+      t.onclick = () => {
+        $("#pmodal-img").src = t.src;
+        thumbs.querySelectorAll("img").forEach(x => x.classList.remove("active"));
+        t.classList.add("active");
+      };
+    });
+  } else {
+    thumbs.hidden = true;
+    thumbs.innerHTML = "";
+  }
   $("#pmodal-cat").textContent = p.category || "";
   $("#pmodal-title").textContent = p.title || "";
   $("#pmodal-price").textContent = fmtARS(p.price || 0);
@@ -558,29 +595,46 @@ async function deleteProduct(id) {
 $("#new-product-btn").onclick = () => openEditProduct(null);
 function openEditProduct(id) {
   editingProductId = id;
-  pendingProductImage = null;
   const p = id ? products[id] : null;
+  pendingImages = p ? (p.images && p.images.length ? [...p.images] : (p.img ? [p.img] : [])) : [];
+  uploadTargetId = id || ("p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7));
   $("#edit-title").textContent = id ? "Editar producto" : "Nuevo producto";
   $("#p-title").value = p ? p.title : "";
   $("#p-category").value = p ? p.category : "";
   $("#p-price").value = p ? p.price : "";
   $("#p-desc").value = p ? (p.description || "") : "";
-  const preview = $("#preview-product");
-  if (p && p.img) { preview.src = p.img; preview.hidden = false; } else { preview.hidden = true; }
+  renderPhotoStrip();
   $("#p-delete").hidden = !id;
   $("#edit-overlay").classList.add("open");
 }
 $("#edit-close").onclick = () => $("#edit-overlay").classList.remove("open");
 $("#edit-overlay").addEventListener("click", (e) => { if (e.target.id === "edit-overlay") $("#edit-overlay").classList.remove("open"); });
 
-$("#drop-product").onclick = () => $("#file-product").click();
+function renderPhotoStrip() {
+  const wrap = $("#photo-strip");
+  wrap.innerHTML = pendingImages.map((url, i) => `
+    <div class="ph"><img src="${url}"><button type="button" data-rm="${i}">✕</button></div>`).join("");
+  wrap.querySelectorAll("[data-rm]").forEach(btn => {
+    btn.onclick = () => { pendingImages.splice(parseInt(btn.dataset.rm, 10), 1); renderPhotoStrip(); };
+  });
+  const drop = $("#drop-product");
+  drop.textContent = pendingImages.length >= 4 ? "Máximo 4 fotos" : `Click para subir fotos (hasta 4) — ${pendingImages.length}/4`;
+}
+
+$("#drop-product").onclick = () => { if (pendingImages.length < 4) $("#file-product").click(); };
 $("#file-product").onchange = async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const dataUrl = await fileToDataUrl(file, 700, 0.78);
-  pendingProductImage = dataUrl;
-  $("#preview-product").src = dataUrl;
-  $("#preview-product").hidden = false;
+  const files = Array.from(e.target.files).slice(0, Math.max(0, 4 - pendingImages.length));
+  e.target.value = "";
+  if (!files.length) return;
+  toast("Procesando fotos...");
+  for (const file of files) {
+    try {
+      const dataUrl = await processProductPhoto(file);
+      pendingImages.push(dataUrl);
+      renderPhotoStrip();
+    } catch (err) { console.error(err); toast("Error procesando una foto"); }
+  }
+  toast("Fotos listas");
 };
 
 $("#p-save").onclick = async () => {
@@ -589,16 +643,17 @@ $("#p-save").onclick = async () => {
   const price = parseFloat($("#p-price").value) || 0;
   const description = $("#p-desc").value.trim();
   if (!title) { toast("Ponele un nombre al producto"); return; }
-  const body = { title, category, price, description };
-  if (pendingProductImage) { body.img = pendingProductImage; body.imgHi = pendingProductImage; }
+  if (pendingImages.length === 0) { toast("Subí al menos una foto"); return; }
+  const body = {
+    title, category, price, description,
+    images: pendingImages, img: pendingImages[0], imgHi: pendingImages[0]
+  };
   try {
     if (editingProductId) {
       await updateDoc(doc(db, "products", editingProductId), body);
       toast("Producto actualizado");
     } else {
-      if (!pendingProductImage) { toast("Subí una foto para el producto nuevo"); return; }
-      const id = "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-      await setDoc(doc(db, "products", id), body);
+      await setDoc(doc(db, "products", uploadTargetId), body);
       toast("Producto agregado");
     }
     $("#edit-overlay").classList.remove("open");
