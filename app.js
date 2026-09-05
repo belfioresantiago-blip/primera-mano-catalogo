@@ -106,6 +106,11 @@ function applyTheme() {
   document.title = settings.brand || "Primera Mano";
   if (settings.logo) { $("#brand-logo").src = settings.logo; $("#brand-logo").hidden = false; }
   else { $("#brand-logo").hidden = true; }
+  const coverBanner = $("#cover-banner");
+  if (coverBanner) {
+    if (settings.cover) { $("#cover-img").src = settings.cover; coverBanner.hidden = false; }
+    else { coverBanner.hidden = true; }
+  }
   const footerBrand = $("#footer-brand"), footerDesc = $("#footer-desc"), footerWa = $("#footer-wa-btn");
   if (footerBrand) footerBrand.textContent = settings.brand || "Primera Mano";
   if (footerDesc) footerDesc.textContent = settings.description || "Catálogo de productos. Armá tu pedido y enviálo por WhatsApp.";
@@ -157,6 +162,18 @@ function renderCats() {
   // datalist for admin product category autocomplete
   const dl = $("#cat-list");
   dl.innerHTML = cats.map(c => `<option value="${c.replace(/"/g,'&quot;')}">`).join("");
+
+  // dropdown alternativo para elegir categoría (más cómodo en mobile)
+  const sel = $("#cat-select");
+  if (sel) {
+    const esc = (s) => s.replace(/"/g, "&quot;");
+    sel.innerHTML =
+      `<option value="__home__">Inicio</option>` +
+      `<option value="__all__">Todos los productos</option>` +
+      cats.map(c => `<option value="${esc(c)}">${escapeHtml(c)}</option>`).join("");
+    sel.value = activeCategory;
+    sel.onchange = () => goToCategory(sel.value);
+  }
 }
 
 // ---------- Grid ----------
@@ -178,11 +195,12 @@ function categorySections(previewCount = 6) {
     return { cat, items, preview: items.slice(0, previewCount) };
   }).filter(s => s.items.length > 0);
 }
-function cardHTML(p) {
+function cardHTML(p, priority) {
+  const loadAttrs = priority ? `loading="eager" fetchpriority="high"` : `loading="lazy" fetchpriority="low"`;
   return `
     <div class="card" data-id="${p.id}">
       <div class="thumb-wrap" data-open="1">
-        <img src="${p.img}" alt="${escapeAttr(p.title)}" loading="lazy" decoding="async">
+        <img src="${p.img}" alt="${escapeAttr(p.title)}" ${loadAttrs} decoding="async">
         ${isAdmin ? `<button class="admin-edit-mini" data-edit="${p.id}">✎</button>` : ""}
       </div>
       <div class="body">
@@ -246,8 +264,9 @@ function renderGrid() {
   backBtn.hidden = false;
 
   const list = filteredProducts();
-  $("#result-count").textContent = list.length + (list.length === 1 ? " producto" : " productos");
-  $("#empty-state").hidden = list.length > 0;
+  const noDataYet = !dataLoaded && Object.keys(products).length === 0;
+  $("#result-count").textContent = noDataYet ? "Cargando productos…" : (list.length + (list.length === 1 ? " producto" : " productos"));
+  $("#empty-state").hidden = list.length > 0 || noDataYet;
 
   const myToken = ++__renderToken;
   grid.innerHTML = "";
@@ -258,7 +277,7 @@ function renderGrid() {
     const frag = document.createDocumentFragment();
     const tmp = document.createElement("div");
     const slice = list.slice(i, i + CHUNK);
-    tmp.innerHTML = slice.map(cardHTML).join("");
+    tmp.innerHTML = slice.map((p, idx) => cardHTML(p, i === 0 && idx < 6)).join("");
     Array.from(tmp.children).forEach(card => { wireCard(card); frag.appendChild(card); });
     grid.appendChild(frag);
     i += CHUNK;
@@ -270,7 +289,12 @@ function renderGrid() {
 function renderHomeSections() {
   const homeEl = $("#home-sections");
   const sections = categorySections(6);
-  homeEl.innerHTML = sections.map(s => `
+  if (sections.length === 0) {
+    homeEl.innerHTML = (!dataLoaded && Object.keys(products).length === 0)
+      ? `<p style="color:var(--muted);padding:20px 0;">Cargando catálogo…</p>` : "";
+    return;
+  }
+  homeEl.innerHTML = sections.map((s, sIdx) => `
     <section class="home-section">
       <div class="home-section-head">
         <h2>${escapeHtml(s.cat)}</h2>
@@ -279,7 +303,7 @@ function renderHomeSections() {
           ${s.items.length > s.preview.length ? `<button class="ver-todos-btn" data-cat="${escapeAttr(s.cat)}">Ver todos →</button>` : ""}
         </div>
       </div>
-      <div class="home-row">${s.preview.map(cardHTML).join("")}</div>
+      <div class="home-row">${s.preview.map((p, idx) => cardHTML(p, sIdx === 0 && idx < 6)).join("")}</div>
     </section>`).join("");
   homeEl.querySelectorAll(".card").forEach(wireCard);
   homeEl.querySelectorAll(".ver-todos-btn").forEach(btn => {
@@ -577,31 +601,42 @@ onAuthStateChanged(auth, (user) => {
 // lo que evita que el catálogo dependa de la cuota diaria de Firestore.
 // Solo cuando alguien se loguea como admin se activan los listeners
 // de Firestore en tiempo real, para poder editar con datos frescos.
-let liveDataActive = false;
+let liveDataActive = false;   // el listener de Firestore ya arrancó (admin logueado)
+let liveSnapshotReceived = false; // Firestore ya trajo datos reales al menos una vez
+let dataLoaded = false;       // hubo AL MENOS una fuente (estática o Firestore) que ya cargó productos
 
-async function loadStaticCatalog() {
+async function loadStaticCatalog(attempt = 1) {
   try {
     const [pRes, sRes] = await Promise.all([
       fetch("data/products.json", { cache: "no-store" }),
       fetch("data/settings.json", { cache: "no-store" }),
     ]);
-    if (!liveDataActive && pRes.ok) {
+    // Solo lo ignoramos si Firestore YA trajo datos reales (no solo "ya arrancó el listener"),
+    // así nunca se queda esperando una carrera que puede perder.
+    if (!liveSnapshotReceived && pRes.ok) {
       const list = await pRes.json();
       const next = {};
       list.forEach(p => { next[p.id] = p; });
       products = next;
+      dataLoaded = true;
       renderCats();
       renderGrid();
       renderCart();
       updateTrustCount();
     }
-    if (!liveDataActive && sRes.ok) {
+    if (!liveSnapshotReceived && sRes.ok) {
       settings = await sRes.json();
       applyTheme();
       renderCart();
       fillConfigForm();
     }
-  } catch (err) { console.error("static catalog load", err); }
+    if (!pRes.ok || !sRes.ok) throw new Error("bad status");
+  } catch (err) {
+    console.error("static catalog load", err);
+    if (attempt < 4 && !liveSnapshotReceived) {
+      setTimeout(() => loadStaticCatalog(attempt + 1), attempt * 1200);
+    }
+  }
 }
 loadStaticCatalog();
 
@@ -614,6 +649,8 @@ function startLiveFirestore() {
     const next = {};
     snap.forEach(d => { next[d.id] = { id: d.id, ...d.data() }; });
     products = next;
+    liveSnapshotReceived = true;
+    dataLoaded = true;
     renderCats();
     renderGrid();
     renderCart();
