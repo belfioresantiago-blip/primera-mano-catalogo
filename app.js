@@ -20,7 +20,7 @@ let settings = {};        // settings/site doc
 let cart = {};             // id -> qty
 let currentUser = null;
 let isAdmin = false;
-let activeCategory = "__all__";
+let activeCategory = "__home__"; // "__home__" = portada con secciones por categoría
 let searchTerm = "";
 let editingProductId = null; // null = new product
 let pendingImages = [];       // base64 data-URLs, being edited for the current product (up to 4)
@@ -111,20 +111,31 @@ function categoriesFromProducts() {
   const set = new Set(Object.values(products).map(p => p.category).filter(Boolean));
   return Array.from(set).sort((a, b) => a.localeCompare(b, "es"));
 }
+function goToCategory(cat) {
+  activeCategory = cat;
+  renderCats();
+  renderGrid();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
 function renderCats() {
   const cats = categoriesFromProducts();
   const wrap = $("#cats");
   wrap.innerHTML = "";
+  const homeChip = document.createElement("button");
+  homeChip.className = "cat-chip" + (activeCategory === "__home__" ? " active" : "");
+  homeChip.textContent = "Inicio";
+  homeChip.onclick = () => goToCategory("__home__");
+  wrap.appendChild(homeChip);
   const allChip = document.createElement("button");
   allChip.className = "cat-chip" + (activeCategory === "__all__" ? " active" : "");
   allChip.textContent = "Todos";
-  allChip.onclick = () => { activeCategory = "__all__"; renderCats(); renderGrid(); };
+  allChip.onclick = () => goToCategory("__all__");
   wrap.appendChild(allChip);
   cats.forEach(c => {
     const chip = document.createElement("button");
     chip.className = "cat-chip" + (activeCategory === c ? " active" : "");
     chip.textContent = c;
-    chip.onclick = () => { activeCategory = c; renderCats(); renderGrid(); };
+    chip.onclick = () => goToCategory(c);
     wrap.appendChild(chip);
   });
   // datalist for admin product category autocomplete
@@ -136,10 +147,20 @@ function renderCats() {
 function filteredProducts() {
   const term = searchTerm.trim().toLowerCase();
   return Object.values(products).filter(p => {
-    if (activeCategory !== "__all__" && p.category !== activeCategory) return false;
+    if (activeCategory !== "__all__" && activeCategory !== "__home__" && p.category !== activeCategory) return false;
     if (term && !(p.title || "").toLowerCase().includes(term)) return false;
     return true;
   });
+}
+// Productos agrupados por categoría para la portada, con una vista previa de N.
+function categorySections(previewCount = 6) {
+  const cats = categoriesFromProducts();
+  return cats.map(cat => {
+    const items = Object.values(products)
+      .filter(p => p.category === cat)
+      .sort((a, b) => (a.title || "").localeCompare(b.title || "", "es"));
+    return { cat, items, preview: items.slice(0, previewCount) };
+  }).filter(s => s.items.length > 0);
 }
 function cardHTML(p) {
   return `
@@ -187,9 +208,29 @@ function wireCard(card) {
   if (editBtn) editBtn.onclick = (e) => { e.stopPropagation(); openEditProduct(id); };
 }
 function renderGrid() {
+  const term = searchTerm.trim();
+  const grid = $("#grid");
+  const homeEl = $("#home-sections");
+  const backBtn = $("#back-to-home");
+  const showHome = activeCategory === "__home__" && !term;
+
+  if (showHome) {
+    grid.hidden = true;
+    $("#empty-state").hidden = true;
+    $("#result-count").hidden = true;
+    backBtn.hidden = true;
+    homeEl.hidden = false;
+    renderHomeSections();
+    return;
+  }
+
+  homeEl.hidden = true;
+  grid.hidden = false;
+  $("#result-count").hidden = false;
+  backBtn.hidden = false;
+
   const list = filteredProducts();
   $("#result-count").textContent = list.length + (list.length === 1 ? " producto" : " productos");
-  const grid = $("#grid");
   $("#empty-state").hidden = list.length > 0;
 
   const myToken = ++__renderToken;
@@ -208,6 +249,26 @@ function renderGrid() {
     if (i < list.length) requestAnimationFrame(renderChunk);
   }
   renderChunk();
+}
+
+function renderHomeSections() {
+  const homeEl = $("#home-sections");
+  const sections = categorySections(6);
+  homeEl.innerHTML = sections.map(s => `
+    <section class="home-section">
+      <div class="home-section-head">
+        <h2>${escapeHtml(s.cat)}</h2>
+        <div class="home-section-actions">
+          <span class="count">${s.items.length} ${s.items.length === 1 ? "producto" : "productos"}</span>
+          ${s.items.length > s.preview.length ? `<button class="ver-todos-btn" data-cat="${escapeAttr(s.cat)}">Ver todos →</button>` : ""}
+        </div>
+      </div>
+      <div class="home-row">${s.preview.map(cardHTML).join("")}</div>
+    </section>`).join("");
+  homeEl.querySelectorAll(".card").forEach(wireCard);
+  homeEl.querySelectorAll(".ver-todos-btn").forEach(btn => {
+    btn.onclick = () => goToCategory(btn.dataset.cat);
+  });
 }
 
 // ---------- Cart ----------
@@ -748,6 +809,8 @@ $("#search-input").oninput = (e) => {
   clearTimeout(__searchDebounce);
   __searchDebounce = setTimeout(() => { searchTerm = val; renderGrid(); }, 180);
 };
+
+$("#back-to-home-inner").onclick = () => { searchTerm = ""; $("#search-input").value = ""; goToCategory("__home__"); };
 
 $("#floating-cart-btn").onclick = () => openCartDrawer("items");
 $("#cart-close").onclick = closeCartDrawer;

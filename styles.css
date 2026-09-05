@@ -106,6 +106,44 @@ input,select,textarea{font:inherit;}
 .add-btn:active{background:var(--brand-dark);}
 .empty-state{max-width:1180px;margin:60px auto;text-align:center;color:var(--muted);padding:0 20px;}
 
+/* ---------- Home (category preview rows) ---------- */
+.home-sections{max-width:1180px;margin:0 auto;padding:8px 20px 90px;}
+.home-section{margin-bottom:36px;animation:section-in .35s ease both;}
+@keyframes section-in{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+.home-section-head{
+  display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+  margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border);
+}
+.home-section-head h2{
+  font-size:1.15rem;font-weight:800;margin:0;letter-spacing:-.01em;
+  display:flex;align-items:center;gap:9px;
+}
+.home-section-head h2::before{
+  content:"";width:4px;height:1.05em;background:var(--brand);border-radius:3px;flex:none;
+}
+.home-section-actions{display:flex;align-items:center;gap:14px;flex:none;}
+.home-section-actions .count{font-size:.78rem;color:var(--muted);white-space:nowrap;}
+.ver-todos-btn{
+  background:none;border:none;color:var(--brand);font-weight:700;font-size:.85rem;
+  white-space:nowrap;padding:4px 2px;transition:transform .15s;
+}
+.ver-todos-btn:hover{text-decoration:underline;transform:translateX(2px);}
+.home-row{
+  display:flex;gap:14px;overflow-x:auto;scroll-snap-type:x proximity;
+  padding:2px 2px 8px;scrollbar-width:none;
+}
+.home-row::-webkit-scrollbar{display:none;}
+.home-row .card{flex:0 0 190px;width:190px;scroll-snap-align:start;}
+@media (max-width:480px){.home-row .card{flex-basis:148px;width:148px;}}
+.back-to-home-btn{
+  max-width:1180px;margin:14px auto 0;padding:0 20px;display:flex;
+}
+.back-to-home-btn button{
+  border:none;background:none;color:var(--muted);font-size:.85rem;font-weight:600;
+  padding:6px 0;display:flex;align-items:center;gap:6px;
+}
+.back-to-home-btn button:hover{color:var(--brand);}
+
 /* ---------- Floating cart bar ---------- */
 .floating-cart{
   position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:70;
