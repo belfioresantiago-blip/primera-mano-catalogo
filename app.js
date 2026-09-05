@@ -106,6 +106,20 @@ function applyTheme() {
   document.title = settings.brand || "Primera Mano";
   if (settings.logo) { $("#brand-logo").src = settings.logo; $("#brand-logo").hidden = false; }
   else { $("#brand-logo").hidden = true; }
+  const footerBrand = $("#footer-brand"), footerDesc = $("#footer-desc"), footerWa = $("#footer-wa-btn");
+  if (footerBrand) footerBrand.textContent = settings.brand || "Primera Mano";
+  if (footerDesc) footerDesc.textContent = settings.description || "Catálogo de productos. Armá tu pedido y enviálo por WhatsApp.";
+  if (footerWa) {
+    const number = (settings.whatsapp || "").replace(/\D/g, "");
+    footerWa.href = number ? `https://wa.me/${number}?text=${encodeURIComponent("Hola! Tengo una consulta sobre " + (settings.brand || "el catálogo"))}` : "#";
+  }
+}
+
+function updateTrustCount() {
+  const el = $("#trust-count");
+  if (!el) return;
+  const n = Object.keys(products).length;
+  if (n > 0) el.textContent = "+" + (Math.floor(n / 10) * 10);
 }
 
 // ---------- Categories ----------
@@ -579,6 +593,7 @@ async function loadStaticCatalog() {
       renderCats();
       renderGrid();
       renderCart();
+      updateTrustCount();
     }
     if (!liveDataActive && sRes.ok) {
       settings = await sRes.json();
@@ -602,6 +617,7 @@ function startLiveFirestore() {
     renderCats();
     renderGrid();
     renderCart();
+    updateTrustCount();
     refreshAdminProductList();
     maybeShowSeedBanner();
   }, (err) => { console.error(err); });
