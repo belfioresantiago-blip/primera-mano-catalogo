@@ -7,7 +7,8 @@
   --muted:#6b7075;
   --border:#e7e7e4;
   --wa:#22c35e;
-  --hiw-num:#1f8a4c;
+  --hiw-num:#FFD700;
+  --hiw-num-text:#111111;
   --radius:14px;
   --shadow:0 1px 3px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.05);
   font-family:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
@@ -120,7 +121,7 @@ input,select,textarea{font:inherit;}
   padding:9px 12px;
 }
 .hiw-num{
-  flex:none;width:24px;height:24px;border-radius:999px;background:var(--hiw-num);color:#fff;
+  flex:none;width:24px;height:24px;border-radius:999px;background:var(--hiw-num);color:var(--hiw-num-text,#111);
   display:flex;align-items:center;justify-content:center;font-weight:800;font-size:.78rem;
 }
 .hiw-step div{display:flex;flex-direction:column;gap:1px;min-width:0;}

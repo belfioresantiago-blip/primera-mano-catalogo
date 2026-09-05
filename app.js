@@ -116,7 +116,7 @@ function applyTheme() {
   root.setProperty("--bg", theme.bg || "#f7f7f5");
   root.setProperty("--text", theme.text || "#17181a");
   root.setProperty("--wa", theme.wa || "#22c35e");
-  root.setProperty("--hiw-num", theme.step || theme.brand || "#1f8a4c");
+  root.setProperty("--hiw-num", theme.step || "#FFD700");
   $("#page-title").textContent = settings.brand || "Primera Mano";
   $("#brand-name").textContent = settings.brand || "Primera Mano";
   $("#hero-title").textContent = settings.brand || "Primera Mano";
@@ -1017,8 +1017,8 @@ function fillConfigForm() {
   $("#cfg-color-text-hex").textContent = theme.text || "#17181a";
   $("#cfg-color-wa").value = theme.wa || "#22c35e";
   $("#cfg-color-wa-hex").textContent = theme.wa || "#22c35e";
-  $("#cfg-color-step").value = theme.step || theme.brand || "#1f8a4c";
-  $("#cfg-color-step-hex").textContent = theme.step || theme.brand || "#1f8a4c";
+  $("#cfg-color-step").value = theme.step || "#FFD700";
+  $("#cfg-color-step-hex").textContent = theme.step || "#FFD700";
   if (settings.logo) { $("#preview-logo").src = settings.logo; $("#preview-logo").hidden = false; }
   if (settings.cover) { $("#preview-cover").src = settings.cover; $("#preview-cover").hidden = false; }
 }
