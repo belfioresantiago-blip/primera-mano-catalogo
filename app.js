@@ -699,13 +699,21 @@ function startLiveFirestore() {
   unsubProducts = onSnapshot(collection(db, "products"), (snap) => {
     const next = {};
     snap.forEach(d => { next[d.id] = { id: d.id, ...d.data() }; });
-    products = next;
     liveSnapshotReceived = true;
-    dataLoaded = true;
-    renderCats();
-    renderGrid();
-    renderCart();
-    updateTrustCount();
+    // El catálogo público (grilla, categorías, portada) NUNCA se reemplaza por un
+    // snapshot de Firestore con MENOS productos que el catálogo estático ya
+    // cargado — evita que un admin logueado vea el catálogo vacío por una carrera
+    // con el caché local de Firestore (primer snapshot local suele venir vacío).
+    const nextCount = Object.keys(next).length;
+    const curCount = Object.keys(products).length;
+    if (nextCount >= curCount) {
+      products = next;
+      dataLoaded = true;
+      renderCats();
+      renderGrid();
+      renderCart();
+      updateTrustCount();
+    }
     refreshAdminProductList();
     maybeShowSeedBanner();
   }, (err) => { console.error(err); });
