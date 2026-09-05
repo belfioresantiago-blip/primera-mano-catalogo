@@ -551,50 +551,68 @@ onAuthStateChanged(auth, (user) => {
   isAdmin = !!(user && user.email && ADMIN_EMAILS.includes(user.email));
   renderAuthSlot();
   renderGrid(); // toggles the little edit pencil on cards
+  if (isAdmin) startLiveFirestore(); // el admin edita con datos frescos de Firestore
 });
 
 // ================================================================
-// FIRESTORE — live data
+// DATOS — estático para visitantes, Firestore en vivo solo para admin
 // ================================================================
-// Carga en dos pasos para que la primera pintura sea liviana:
-// 1) un getDocs() chico (60 productos) alcanza y sobra para armar
-//    la portada (6 por categoría), así el inicio no espera a bajar
-//    el catálogo completo.
-// 2) en paralelo, el listener en tiempo real trae el resto (para
-//    buscador, "Ver todos", categorías completas y el panel admin).
-let fullDataLoaded = false;
+// Los visitantes NUNCA leen de Firestore: la página pública se arma
+// con /data/products.json y /data/settings.json, que sirve Netlify
+// como archivos estáticos (gratis, sin límite de lecturas). Esto es
+// lo que evita que el catálogo dependa de la cuota diaria de Firestore.
+// Solo cuando alguien se loguea como admin se activan los listeners
+// de Firestore en tiempo real, para poder editar con datos frescos.
+let liveDataActive = false;
 
-(async () => {
+async function loadStaticCatalog() {
   try {
-    const snap = await getDocs(query(collection(db, "products"), limit(60)));
-    if (fullDataLoaded) return; // el listener completo ya llegó primero
+    const [pRes, sRes] = await Promise.all([
+      fetch("data/products.json", { cache: "no-store" }),
+      fetch("data/settings.json", { cache: "no-store" }),
+    ]);
+    if (!liveDataActive && pRes.ok) {
+      const list = await pRes.json();
+      const next = {};
+      list.forEach(p => { next[p.id] = p; });
+      products = next;
+      renderCats();
+      renderGrid();
+      renderCart();
+    }
+    if (!liveDataActive && sRes.ok) {
+      settings = await sRes.json();
+      applyTheme();
+      renderCart();
+      fillConfigForm();
+    }
+  } catch (err) { console.error("static catalog load", err); }
+}
+loadStaticCatalog();
+
+let unsubProducts = null;
+let unsubSettings = null;
+function startLiveFirestore() {
+  if (liveDataActive) return;
+  liveDataActive = true;
+  unsubProducts = onSnapshot(collection(db, "products"), (snap) => {
     const next = {};
     snap.forEach(d => { next[d.id] = { id: d.id, ...d.data() }; });
     products = next;
     renderCats();
     renderGrid();
     renderCart();
-  } catch (err) { console.error("preview load", err); }
-})();
+    refreshAdminProductList();
+    maybeShowSeedBanner();
+  }, (err) => { console.error(err); });
 
-onSnapshot(collection(db, "products"), (snap) => {
-  const next = {};
-  snap.forEach(d => { next[d.id] = { id: d.id, ...d.data() }; });
-  products = next;
-  fullDataLoaded = true;
-  renderCats();
-  renderGrid();
-  renderCart();
-  refreshAdminProductList();
-  maybeShowSeedBanner();
-}, (err) => { console.error(err); });
-
-onSnapshot(doc(db, "settings", "site"), (snap) => {
-  settings = snap.exists() ? snap.data() : {};
-  applyTheme();
-  renderCart();
-  fillConfigForm();
-});
+  unsubSettings = onSnapshot(doc(db, "settings", "site"), (snap) => {
+    settings = snap.exists() ? snap.data() : {};
+    applyTheme();
+    renderCart();
+    fillConfigForm();
+  });
+}
 
 // ================================================================
 // ADMIN — drawer, tabs
