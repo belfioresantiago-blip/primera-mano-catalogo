@@ -647,17 +647,41 @@ async function loadStaticProducts(attempt = 1) {
 }
 loadStaticProducts();
 
-// Config/diseño: se lee de Firestore para todos (un solo doc → costo mínimo),
-// con getDoc (lectura puntual) en vez de onSnapshot: el listener en tiempo
-// real depende de mantener abierto un canal (WebChannel) que a veces no
-// logra conectar según la red del visitante, y ahí se queda sin traer nada.
-// getDoc es una lectura simple y directa, mucho más confiable — y alcanza:
-// no hace falta que el cambio de color/portada se vea "en vivo" en una
-// pestaña ya abierta, con que se vea en la próxima carga de la página sobra.
+// Config/diseño: se lee de Firestore para todos (un solo doc → costo mínimo).
+// Se pide por REST directo (fetch simple), no con el SDK: el SDK mantiene un
+// canal (WebChannel) persistente y, si a ese canal le cuesta conectar en la
+// red del visitante, el SDK completo queda "offline" y hasta un getDoc()
+// puntual falla — un fetch() común no tiene ese problema, es una lectura
+// HTTPS directa y listo. Alcanza de sobra: no hace falta ver el cambio de
+// color/portada "en vivo" en una pestaña ya abierta, con que se vea en la
+// próxima carga de la página sobra.
+function parseFirestoreValue(v) {
+  if (!v) return null;
+  if ("stringValue" in v) return v.stringValue;
+  if ("integerValue" in v) return Number(v.integerValue);
+  if ("doubleValue" in v) return v.doubleValue;
+  if ("booleanValue" in v) return v.booleanValue;
+  if ("nullValue" in v) return null;
+  if ("mapValue" in v) return parseFirestoreFields(v.mapValue.fields || {});
+  if ("arrayValue" in v) return (v.arrayValue.values || []).map(parseFirestoreValue);
+  return null;
+}
+function parseFirestoreFields(fields) {
+  const out = {};
+  for (const k in fields) out[k] = parseFirestoreValue(fields[k]);
+  return out;
+}
 async function loadSettings(attempt = 1) {
   try {
-    const snap = await getDoc(doc(db, "settings", "site"));
-    settings = snap.exists() ? snap.data() : {};
+    const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents/settings/site?key=${firebaseConfig.apiKey}`;
+    const res = await fetch(url);
+    if (res.status === 404) { settings = {}; }
+    else if (res.ok) {
+      const json = await res.json();
+      settings = parseFirestoreFields(json.fields || {});
+    } else {
+      throw new Error("status " + res.status);
+    }
     applyTheme();
     renderCart();
     fillConfigForm();
@@ -985,6 +1009,10 @@ $("#save-config-btn").onclick = async () => {
   if (pendingCoverImage) body.cover = pendingCoverImage;
   try {
     await setDoc(doc(db, "settings", "site"), body, { merge: true });
+    settings = { ...settings, ...body };
+    pendingLogoImage = null; pendingCoverImage = null;
+    applyTheme();
+    renderCart();
     toast("Cambios guardados");
   } catch (e) { console.error(e); toast("No se pudo guardar"); }
 };
