@@ -41,12 +41,25 @@ let checkoutData = { nombre: "", pago: "", entrega: "", entreCalles: "", localid
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 function fmtARS(n) { return "$" + Math.round(n).toLocaleString("es-AR"); }
-function toast(msg) {
+function toast(msg, kind = "ok") {
   const t = $("#toast");
-  t.textContent = msg;
-  t.classList.add("show");
+  t.textContent = (kind === "error" ? "⚠ " : kind === "ok" ? "✔ " : "") + msg;
+  t.classList.remove("toast-ok", "toast-error");
+  t.classList.add("show", kind === "error" ? "toast-error" : "toast-ok");
   clearTimeout(toast._h);
-  toast._h = setTimeout(() => t.classList.remove("show"), 2200);
+  toast._h = setTimeout(() => t.classList.remove("show"), kind === "error" ? 4200 : 2600);
+}
+// Traduce un error de guardado (Firestore u otro) a un mensaje que explica
+// QUÉ pasó y no deja al usuario adivinando si quedó guardado o no.
+function saveErrorMessage(e) {
+  const s = ((e && (e.code || e.message || "")) + "").toLowerCase();
+  if (s.includes("resource-exhausted") || s.includes("quota") || s.includes("429")) {
+    return "No se guardó: la base de datos gratuita llegó a su límite de uso de hoy. Probá de nuevo más tarde (se restablece cada día).";
+  }
+  if (s.includes("permission") || s.includes("insufficient")) {
+    return "No se guardó: no tenés permiso para editar (revisá que iniciaste sesión con el mail correcto).";
+  }
+  return "No se guardó. Probá de nuevo en un momento.";
 }
 function saveCart() {
   try { localStorage.setItem("pm_cart_v1", JSON.stringify(cart)); } catch (e) {}
@@ -863,7 +876,7 @@ function refreshAdminProductList() {
 async function deleteProduct(id) {
   if (!confirm("¿Eliminar este producto del catálogo?")) return;
   try { await deleteDoc(doc(db, "products", id)); toast("Producto eliminado"); }
-  catch (e) { console.error(e); toast("No se pudo eliminar"); }
+  catch (e) { console.error(e); toast(saveErrorMessage(e), "error"); }
 }
 
 // ---------- New / edit product modal ----------
@@ -959,22 +972,30 @@ $("#p-save").onclick = async () => {
   const category = $("#p-category").value.trim();
   const price = parseFloat($("#p-price").value) || 0;
   const description = $("#p-desc").value.trim();
-  if (!title) { toast("Ponele un nombre al producto"); return; }
-  if (pendingImages.length === 0) { toast("Subí al menos una foto"); return; }
+  if (!title) { toast("Ponele un nombre al producto", "error"); return; }
+  if (pendingImages.length === 0) { toast("Subí al menos una foto", "error"); return; }
   const body = {
     title, category, price, description,
     images: pendingImages, img: pendingImages[0], imgHi: pendingImages[0]
   };
+  const btn = $("#p-save");
+  const originalLabel = btn.textContent;
+  btn.disabled = true; btn.textContent = "Guardando...";
   try {
     if (editingProductId) {
       await updateDoc(doc(db, "products", editingProductId), body);
-      toast("Producto actualizado");
+      toast("Producto actualizado y guardado");
     } else {
       await setDoc(doc(db, "products", uploadTargetId), body);
-      toast("Producto agregado");
+      toast("Producto agregado y guardado");
     }
     $("#edit-overlay").classList.remove("open");
-  } catch (e) { console.error(e); toast("No se pudo guardar"); }
+  } catch (e) {
+    console.error(e);
+    toast(saveErrorMessage(e), "error");
+  } finally {
+    btn.disabled = false; btn.textContent = originalLabel;
+  }
 };
 $("#p-delete").onclick = async () => {
   if (!editingProductId) return;
@@ -1038,14 +1059,22 @@ $("#save-config-btn").onclick = async () => {
   };
   if (pendingLogoImage) body.logo = pendingLogoImage;
   if (pendingCoverImage) body.cover = pendingCoverImage;
+  const btn = $("#save-config-btn");
+  const originalLabel = btn.textContent;
+  btn.disabled = true; btn.textContent = "Guardando...";
   try {
     await setDoc(doc(db, "settings", "site"), body, { merge: true });
     settings = { ...settings, ...body };
     pendingLogoImage = null; pendingCoverImage = null;
     applyTheme();
     renderCart();
-    toast("Cambios guardados");
-  } catch (e) { console.error(e); toast("No se pudo guardar"); }
+    toast("Cambios guardados correctamente");
+  } catch (e) {
+    console.error(e);
+    toast(saveErrorMessage(e), "error");
+  } finally {
+    btn.disabled = false; btn.textContent = originalLabel;
+  }
 };
 
 // ================================================================
