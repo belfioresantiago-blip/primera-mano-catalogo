@@ -671,23 +671,41 @@ function parseFirestoreFields(fields) {
   for (const k in fields) out[k] = parseFirestoreValue(fields[k]);
   return out;
 }
-async function loadSettings(attempt = 1) {
+// La config del catálogo (logo, portada, nombre, whatsapp, colores) se guarda
+// como archivo fijo en data/settings.json — igual que data/products.json —
+// para que NUNCA dependa de la cuota diaria de Firestore. Esto es la fuente
+// de verdad: siempre carga, aunque Firestore esté con el límite superado.
+// Firestore se consulta SOLO como capa opcional "en vivo": si responde bien Y
+// trae un cambio más nuevo que el del archivo fijo, lo usa; si Firestore falla
+// (cuota superada, sin conexión, etc.) el archivo fijo ya se aplicó y el sitio
+// sigue funcionando igual, sin pantalla en blanco ni datos faltantes.
+async function loadSettings() {
+  try {
+    const res = await fetch("data/settings.json", { cache: "no-store" });
+    if (res.ok) {
+      settings = await res.json();
+      applyTheme();
+      renderCart();
+      fillConfigForm();
+    }
+  } catch (err) {
+    console.error("static settings load", err);
+  }
   try {
     const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents/settings/site?key=${firebaseConfig.apiKey}`;
     const res = await fetch(url);
-    if (res.status === 404) { settings = {}; }
-    else if (res.ok) {
+    if (res.ok) {
       const json = await res.json();
-      settings = parseFirestoreFields(json.fields || {});
-    } else {
-      throw new Error("status " + res.status);
+      const live = parseFirestoreFields(json.fields || {});
+      if (!settings.updatedAt || (live.updatedAt && live.updatedAt > settings.updatedAt)) {
+        settings = live;
+        applyTheme();
+        renderCart();
+        fillConfigForm();
+      }
     }
-    applyTheme();
-    renderCart();
-    fillConfigForm();
   } catch (err) {
-    console.error("settings load", err);
-    if (attempt < 5) setTimeout(() => loadSettings(attempt + 1), attempt * 1000);
+    console.error("live settings load (no bloquea el sitio)", err);
   }
 }
 loadSettings();
