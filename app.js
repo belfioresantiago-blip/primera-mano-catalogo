@@ -5,7 +5,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
   getFirestore, collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc,
-  writeBatch, getDocs, query, limit
+  writeBatch, getDocs, getDoc, query, limit
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import {
   getStorage, ref as storageRef, uploadString, uploadBytes, getDownloadURL, deleteObject
@@ -93,11 +93,16 @@ async function processProductPhoto(file, targetBytes = 500000) {
 }
 
 // ---------- Theme ----------
+function waLink(number, text) {
+  return number ? `https://wa.me/${number}?text=${encodeURIComponent(text)}` : "#";
+}
 function applyTheme() {
   const theme = settings.theme || {};
   const root = document.documentElement.style;
   root.setProperty("--brand", theme.brand || "#1f8a4c");
   root.setProperty("--bg", theme.bg || "#f7f7f5");
+  root.setProperty("--text", theme.text || "#17181a");
+  root.setProperty("--wa", theme.wa || "#22c35e");
   $("#page-title").textContent = settings.brand || "Primera Mano";
   $("#brand-name").textContent = settings.brand || "Primera Mano";
   $("#hero-title").textContent = settings.brand || "Primera Mano";
@@ -114,9 +119,13 @@ function applyTheme() {
   const footerBrand = $("#footer-brand"), footerDesc = $("#footer-desc"), footerWa = $("#footer-wa-btn");
   if (footerBrand) footerBrand.textContent = settings.brand || "Primera Mano";
   if (footerDesc) footerDesc.textContent = settings.description || "Catálogo de productos. Armá tu pedido y enviálo por WhatsApp.";
-  if (footerWa) {
-    const number = (settings.whatsapp || "").replace(/\D/g, "");
-    footerWa.href = number ? `https://wa.me/${number}?text=${encodeURIComponent("Hola! Tengo una consulta sobre " + (settings.brand || "el catálogo"))}` : "#";
+  const number = (settings.whatsapp || "").replace(/\D/g, "");
+  const waText = "Hola! Tengo una consulta sobre " + (settings.brand || "el catálogo");
+  if (footerWa) footerWa.href = waLink(number, waText);
+  const heroWa = $("#hero-wa-btn");
+  if (heroWa) {
+    if (number) { heroWa.href = waLink(number, waText); heroWa.hidden = false; }
+    else { heroWa.hidden = true; }
   }
 }
 
@@ -593,27 +602,32 @@ onAuthStateChanged(auth, (user) => {
 });
 
 // ================================================================
-// DATOS — estático para visitantes, Firestore en vivo solo para admin
+// DATOS
 // ================================================================
-// Los visitantes NUNCA leen de Firestore: la página pública se arma
-// con /data/products.json y /data/settings.json, que sirve Netlify
-// como archivos estáticos (gratis, sin límite de lecturas). Esto es
-// lo que evita que el catálogo dependa de la cuota diaria de Firestore.
-// Solo cuando alguien se loguea como admin se activan los listeners
-// de Firestore en tiempo real, para poder editar con datos frescos.
-let liveDataActive = false;   // el listener de Firestore ya arrancó (admin logueado)
-let liveSnapshotReceived = false; // Firestore ya trajo datos reales al menos una vez
+// PRODUCTOS: los visitantes NUNCA leen la colección completa de Firestore.
+// La página pública se arma con /data/products.json, que sirve Netlify como
+// archivo estático (gratis, sin límite de lecturas). Esto es lo que evita
+// que el catálogo dependa de la cuota diaria de Firestore. Solo cuando
+// alguien se loguea como admin se activa el listener en tiempo real, para
+// poder editar con datos frescos.
+//
+// DISEÑO/CONFIG (marca, colores, logo, portada, WhatsApp): esto SÍ se lee
+// siempre en vivo desde Firestore para TODOS los visitantes — es un solo
+// documento (una lectura, no 531), así que no pesa nada en la cuota. La
+// ventaja: cualquier cambio de color, foto de portada, logo, etc. que hagas
+// desde "Editar catálogo" se ve al toque para todo el mundo, sin que haga
+// falta volver a publicar nada.
+let liveDataActive = false;   // el listener de productos en Firestore ya arrancó (admin logueado)
+let liveSnapshotReceived = false; // Firestore ya trajo productos reales al menos una vez
 let dataLoaded = false;       // hubo AL MENOS una fuente (estática o Firestore) que ya cargó productos
 
-async function loadStaticCatalog(attempt = 1) {
+async function loadStaticProducts(attempt = 1) {
   try {
-    const [pRes, sRes] = await Promise.all([
-      fetch("data/products.json", { cache: "no-store" }),
-      fetch("data/settings.json", { cache: "no-store" }),
-    ]);
+    const pRes = await fetch("data/products.json", { cache: "no-store" });
+    if (!pRes.ok) throw new Error("bad status " + pRes.status);
     // Solo lo ignoramos si Firestore YA trajo datos reales (no solo "ya arrancó el listener"),
     // así nunca se queda esperando una carrera que puede perder.
-    if (!liveSnapshotReceived && pRes.ok) {
+    if (!liveSnapshotReceived) {
       const list = await pRes.json();
       const next = {};
       list.forEach(p => { next[p.id] = p; });
@@ -624,24 +638,24 @@ async function loadStaticCatalog(attempt = 1) {
       renderCart();
       updateTrustCount();
     }
-    if (!liveSnapshotReceived && sRes.ok) {
-      settings = await sRes.json();
-      applyTheme();
-      renderCart();
-      fillConfigForm();
-    }
-    if (!pRes.ok || !sRes.ok) throw new Error("bad status");
   } catch (err) {
-    console.error("static catalog load", err);
+    console.error("static products load", err);
     if (attempt < 4 && !liveSnapshotReceived) {
-      setTimeout(() => loadStaticCatalog(attempt + 1), attempt * 1200);
+      setTimeout(() => loadStaticProducts(attempt + 1), attempt * 1200);
     }
   }
 }
-loadStaticCatalog();
+loadStaticProducts();
+
+// Config/diseño: siempre en vivo, para todos. Un solo doc → costo mínimo.
+onSnapshot(doc(db, "settings", "site"), (snap) => {
+  settings = snap.exists() ? snap.data() : {};
+  applyTheme();
+  renderCart();
+  fillConfigForm();
+}, (err) => console.error("settings live", err));
 
 let unsubProducts = null;
-let unsubSettings = null;
 function startLiveFirestore() {
   if (liveDataActive) return;
   liveDataActive = true;
@@ -658,13 +672,6 @@ function startLiveFirestore() {
     refreshAdminProductList();
     maybeShowSeedBanner();
   }, (err) => { console.error(err); });
-
-  unsubSettings = onSnapshot(doc(db, "settings", "site"), (snap) => {
-    settings = snap.exists() ? snap.data() : {};
-    applyTheme();
-    renderCart();
-    fillConfigForm();
-  });
 }
 
 // ================================================================
@@ -921,11 +928,17 @@ function fillConfigForm() {
   $("#cfg-color-brand-hex").textContent = theme.brand || "#1f8a4c";
   $("#cfg-color-bg").value = theme.bg || "#f7f7f5";
   $("#cfg-color-bg-hex").textContent = theme.bg || "#f7f7f5";
+  $("#cfg-color-text").value = theme.text || "#17181a";
+  $("#cfg-color-text-hex").textContent = theme.text || "#17181a";
+  $("#cfg-color-wa").value = theme.wa || "#22c35e";
+  $("#cfg-color-wa-hex").textContent = theme.wa || "#22c35e";
   if (settings.logo) { $("#preview-logo").src = settings.logo; $("#preview-logo").hidden = false; }
   if (settings.cover) { $("#preview-cover").src = settings.cover; $("#preview-cover").hidden = false; }
 }
 $("#cfg-color-brand").oninput = (e) => { $("#cfg-color-brand-hex").textContent = e.target.value; };
 $("#cfg-color-bg").oninput = (e) => { $("#cfg-color-bg-hex").textContent = e.target.value; };
+$("#cfg-color-text").oninput = (e) => { $("#cfg-color-text-hex").textContent = e.target.value; };
+$("#cfg-color-wa").oninput = (e) => { $("#cfg-color-wa-hex").textContent = e.target.value; };
 
 $("#drop-logo").onclick = () => $("#file-logo").click();
 $("#file-logo").onchange = async (e) => {
@@ -947,7 +960,12 @@ $("#save-config-btn").onclick = async () => {
     brand: $("#cfg-brand").value.trim() || "Primera Mano",
     description: $("#cfg-desc").value.trim(),
     whatsapp: $("#cfg-whatsapp").value.replace(/\D/g, ""),
-    theme: { brand: $("#cfg-color-brand").value, bg: $("#cfg-color-bg").value },
+    theme: {
+      brand: $("#cfg-color-brand").value,
+      bg: $("#cfg-color-bg").value,
+      text: $("#cfg-color-text").value,
+      wa: $("#cfg-color-wa").value
+    },
     updatedAt: Date.now()
   };
   if (pendingLogoImage) body.logo = pendingLogoImage;
