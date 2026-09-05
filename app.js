@@ -7,11 +7,15 @@ import {
   getFirestore, collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc,
   writeBatch, getDocs, query, limit
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import {
+  getStorage, ref as storageRef, uploadString, uploadBytes, getDownloadURL, deleteObject
+} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
 // ---------- Firebase init ----------
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app);
 const provider = new GoogleAuthProvider();
 
 // ---------- State ----------
@@ -70,15 +74,13 @@ function fileToDataUrl(file, maxSize, quality) {
   });
 }
 
-// Convierte una foto de producto a un data-URL base64, nítida pero acotada en
-// peso para que hasta 4 fotos por producto entren en el límite de 1MB por
-// documento de Firestore. Prueba tamaños/calidad decrecientes hasta que el
-// resultado quede por debajo de targetBytes (por defecto ~220KB en base64,
-// que para 4 fotos deja el documento en ~900KB, con margen para el resto de
-// los campos).
-async function processProductPhoto(file, targetBytes = 220000) {
+// Convierte una foto de producto a un data-URL base64, nítida y liviana para
+// que la subida a Storage sea rápida. Como las fotos ahora se guardan como
+// archivos en Storage (no adentro del documento de Firestore), no hace falta
+// acotarlas al límite de 1MB por documento — se prioriza nitidez.
+async function processProductPhoto(file, targetBytes = 500000) {
   const steps = [
-    [1280, 0.85], [1280, 0.72], [1024, 0.72], [1024, 0.6],
+    [1600, 0.85], [1280, 0.85], [1280, 0.72], [1024, 0.72], [1024, 0.6],
     [800, 0.65], [800, 0.5], [640, 0.5], [480, 0.45]
   ];
   let last = null;
@@ -643,6 +645,27 @@ $("#seed-btn").onclick = async () => {
   }
 };
 
+// ---------- Botón: optimizar fotos (migrar a Storage) ----------
+$("#migrate-images-btn").onclick = async () => {
+  $("#migrate-images-btn").disabled = true;
+  $("#migrate-progress").hidden = false;
+  $("#migrate-progress").textContent = "Buscando fotos para optimizar...";
+  try {
+    const res = await migrateImagesToStorage((done, total) => {
+      $("#migrate-progress").textContent = `Optimizando fotos... ${done}/${total}`;
+    });
+    $("#migrate-progress").textContent = res.total === 0
+      ? "No había fotos pesadas para optimizar. Todo al día."
+      : `¡Listo! Se optimizaron ${res.done} de ${res.total} productos.`;
+    toast("Optimización completa");
+  } catch (e) {
+    console.error(e);
+    $("#migrate-progress").textContent = "Hubo un error optimizando. Probá de nuevo.";
+  } finally {
+    $("#migrate-images-btn").disabled = false;
+  }
+};
+
 // ---------- Admin product list ----------
 let adminSearchTerm = "";
 $("#admin-search").oninput = (e) => { adminSearchTerm = e.target.value; refreshAdminProductList(); };
@@ -714,16 +737,58 @@ $("#file-product").onchange = async (e) => {
   const files = Array.from(e.target.files).slice(0, Math.max(0, 4 - pendingImages.length));
   e.target.value = "";
   if (!files.length) return;
-  toast("Procesando fotos...");
+  toast("Subiendo fotos...");
   for (const file of files) {
     try {
       const dataUrl = await processProductPhoto(file);
-      pendingImages.push(dataUrl);
+      const url = await uploadImageToStorage(dataUrl, uploadTargetId);
+      pendingImages.push(url);
       renderPhotoStrip();
-    } catch (err) { console.error(err); toast("Error procesando una foto"); }
+    } catch (err) { console.error(err); toast("Error subiendo una foto"); }
   }
   toast("Fotos listas");
 };
+
+// Sube una foto (data-URL ya comprimida) a Firebase Storage y devuelve su URL
+// pública, en vez de guardar el base64 adentro del documento del producto.
+// Esto es lo que mantiene cada documento de Firestore liviano — clave para
+// que el listado cargue rápido y no se corte, aunque haya cientos de fotos.
+async function uploadImageToStorage(dataUrl, productId) {
+  const path = `products/${productId}/${Date.now()}_${Math.random().toString(36).slice(2, 7)}.jpg`;
+  const sRef = storageRef(storage, path);
+  await uploadString(sRef, dataUrl, "data_url");
+  return getDownloadURL(sRef);
+}
+
+// ---------- Migración: fotos base64 viejas -> Firebase Storage ----------
+// Recorre los productos que todavía tienen fotos embebidas (base64) y las
+// sube a Storage, reemplazando el campo images/img/imgHi por URLs livianas.
+async function migrateImagesToStorage(onProgress) {
+  const list = Object.values(products).filter(p =>
+    (p.images && p.images.some(u => typeof u === "string" && u.startsWith("data:"))) ||
+    (typeof p.img === "string" && p.img.startsWith("data:"))
+  );
+  let done = 0;
+  for (const p of list) {
+    try {
+      const imgs = (p.images && p.images.length) ? p.images : (p.img ? [p.img] : []);
+      const newUrls = [];
+      for (const img of imgs) {
+        if (typeof img === "string" && img.startsWith("data:")) {
+          newUrls.push(await uploadImageToStorage(img, p.id));
+        } else {
+          newUrls.push(img);
+        }
+      }
+      if (newUrls.length) {
+        await updateDoc(doc(db, "products", p.id), { images: newUrls, img: newUrls[0], imgHi: newUrls[0] });
+      }
+    } catch (e) { console.error("migrate fail", p.id, e); }
+    done++;
+    if (onProgress) onProgress(done, list.length);
+  }
+  return { total: list.length, done };
+}
 
 $("#p-save").onclick = async () => {
   const title = $("#p-title").value.trim();
