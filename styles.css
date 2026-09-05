@@ -80,6 +80,7 @@ input,select,textarea{font:inherit;}
 .card{
   background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
   overflow:hidden;display:flex;flex-direction:column;transition:transform .15s, box-shadow .15s;
+  content-visibility:auto;contain-intrinsic-size:0 280px;
 }
 .card:hover{transform:translateY(-2px);box-shadow:var(--shadow);}
 .card .thumb-wrap{aspect-ratio:1/1;background:#f0f0ee;position:relative;cursor:zoom-in;overflow:hidden;}

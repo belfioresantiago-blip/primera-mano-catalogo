@@ -145,7 +145,7 @@ function cardHTML(p) {
   return `
     <div class="card" data-id="${p.id}">
       <div class="thumb-wrap" data-open="1">
-        <img src="${p.img}" alt="${escapeAttr(p.title)}" loading="lazy">
+        <img src="${p.img}" alt="${escapeAttr(p.title)}" loading="lazy" decoding="async">
         ${isAdmin ? `<button class="admin-edit-mini" data-edit="${p.id}">✎</button>` : ""}
       </div>
       <div class="body">
@@ -164,34 +164,50 @@ function cardHTML(p) {
 function escapeHtml(s) { return (s || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function escapeAttr(s) { return escapeHtml(s); }
 
+let __renderToken = 0;
+function wireCard(card) {
+  const id = card.dataset.id;
+  const stepper = card.querySelector("[data-qty]");
+  let localQty = 1;
+  stepper.querySelectorAll("button").forEach(b => {
+    b.onclick = () => {
+      localQty = Math.max(1, localQty + parseInt(b.dataset.d, 10));
+      stepper.querySelector("span").textContent = localQty;
+    };
+  });
+  card.querySelector("[data-add]").onclick = () => {
+    addToCart(id, localQty);
+    localQty = 1;
+    stepper.querySelector("span").textContent = 1;
+  };
+  card.querySelectorAll("[data-open]").forEach(el => {
+    el.onclick = () => openProductModal(id);
+  });
+  const editBtn = card.querySelector("[data-edit]");
+  if (editBtn) editBtn.onclick = (e) => { e.stopPropagation(); openEditProduct(id); };
+}
 function renderGrid() {
   const list = filteredProducts();
   $("#result-count").textContent = list.length + (list.length === 1 ? " producto" : " productos");
   const grid = $("#grid");
-  grid.innerHTML = list.map(cardHTML).join("");
   $("#empty-state").hidden = list.length > 0;
 
-  $$(".card").forEach(card => {
-    const id = card.dataset.id;
-    const stepper = card.querySelector("[data-qty]");
-    let localQty = 1;
-    stepper.querySelectorAll("button").forEach(b => {
-      b.onclick = () => {
-        localQty = Math.max(1, localQty + parseInt(b.dataset.d, 10));
-        stepper.querySelector("span").textContent = localQty;
-      };
-    });
-    card.querySelector("[data-add]").onclick = () => {
-      addToCart(id, localQty);
-      localQty = 1;
-      stepper.querySelector("span").textContent = 1;
-    };
-    card.querySelectorAll("[data-open]").forEach(el => {
-      el.onclick = () => openProductModal(id);
-    });
-    const editBtn = card.querySelector("[data-edit]");
-    if (editBtn) editBtn.onclick = (e) => { e.stopPropagation(); openEditProduct(id); };
-  });
+  const myToken = ++__renderToken;
+  grid.innerHTML = "";
+  const CHUNK = 24;
+  let i = 0;
+  function renderChunk() {
+    if (myToken !== __renderToken) return; // a newer render superseded this one
+    const frag = document.createDocumentFragment();
+    const tmp = document.createElement("div");
+    const slice = list.slice(i, i + CHUNK);
+    tmp.innerHTML = slice.map(cardHTML).join("");
+    Array.from(tmp.children).forEach(card => { wireCard(card); frag.appendChild(card); });
+    grid.appendChild(frag);
+    i += CHUNK;
+    if (i < list.length) requestAnimationFrame(renderChunk);
+  }
+  renderChunk();
 }
 
 // ---------- Cart ----------
@@ -726,7 +742,12 @@ $("#save-config-btn").onclick = async () => {
 // ================================================================
 // WIRING — search, cart drawer, product modal, cart badge
 // ================================================================
-$("#search-input").oninput = (e) => { searchTerm = e.target.value; renderGrid(); };
+let __searchDebounce = null;
+$("#search-input").oninput = (e) => {
+  const val = e.target.value;
+  clearTimeout(__searchDebounce);
+  __searchDebounce = setTimeout(() => { searchTerm = val; renderGrid(); }, 180);
+};
 
 $("#floating-cart-btn").onclick = () => openCartDrawer("items");
 $("#cart-close").onclick = closeCartDrawer;
