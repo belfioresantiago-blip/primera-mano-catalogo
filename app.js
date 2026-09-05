@@ -587,7 +587,7 @@ function renderAuthSlot() {
     slot.innerHTML = `<img class="avatar" src="${currentUser.photoURL || ""}" title="${currentUser.email}">`;
   } else {
     slot.innerHTML = `
-      <button class="admin-toggle off" id="admin-toggle-btn">✎ Editar catálogo</button>
+      <button class="admin-toggle off" id="admin-toggle-btn">✎ <span>Editar catálogo</span></button>
       <img class="avatar" src="${currentUser.photoURL || ""}" title="${currentUser.email}">`;
     $("#admin-toggle-btn").onclick = openAdminDrawer;
   }
@@ -647,13 +647,26 @@ async function loadStaticProducts(attempt = 1) {
 }
 loadStaticProducts();
 
-// Config/diseño: siempre en vivo, para todos. Un solo doc → costo mínimo.
-onSnapshot(doc(db, "settings", "site"), (snap) => {
-  settings = snap.exists() ? snap.data() : {};
-  applyTheme();
-  renderCart();
-  fillConfigForm();
-}, (err) => console.error("settings live", err));
+// Config/diseño: se lee de Firestore para todos (un solo doc → costo mínimo),
+// con getDoc (lectura puntual) en vez de onSnapshot: el listener en tiempo
+// real depende de mantener abierto un canal (WebChannel) que a veces no
+// logra conectar según la red del visitante, y ahí se queda sin traer nada.
+// getDoc es una lectura simple y directa, mucho más confiable — y alcanza:
+// no hace falta que el cambio de color/portada se vea "en vivo" en una
+// pestaña ya abierta, con que se vea en la próxima carga de la página sobra.
+async function loadSettings(attempt = 1) {
+  try {
+    const snap = await getDoc(doc(db, "settings", "site"));
+    settings = snap.exists() ? snap.data() : {};
+    applyTheme();
+    renderCart();
+    fillConfigForm();
+  } catch (err) {
+    console.error("settings load", err);
+    if (attempt < 5) setTimeout(() => loadSettings(attempt + 1), attempt * 1000);
+  }
+}
+loadSettings();
 
 let unsubProducts = null;
 function startLiveFirestore() {
