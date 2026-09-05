@@ -556,10 +556,32 @@ onAuthStateChanged(auth, (user) => {
 // ================================================================
 // FIRESTORE — live data
 // ================================================================
+// Carga en dos pasos para que la primera pintura sea liviana:
+// 1) un getDocs() chico (60 productos) alcanza y sobra para armar
+//    la portada (6 por categoría), así el inicio no espera a bajar
+//    el catálogo completo.
+// 2) en paralelo, el listener en tiempo real trae el resto (para
+//    buscador, "Ver todos", categorías completas y el panel admin).
+let fullDataLoaded = false;
+
+(async () => {
+  try {
+    const snap = await getDocs(query(collection(db, "products"), limit(60)));
+    if (fullDataLoaded) return; // el listener completo ya llegó primero
+    const next = {};
+    snap.forEach(d => { next[d.id] = { id: d.id, ...d.data() }; });
+    products = next;
+    renderCats();
+    renderGrid();
+    renderCart();
+  } catch (err) { console.error("preview load", err); }
+})();
+
 onSnapshot(collection(db, "products"), (snap) => {
   const next = {};
   snap.forEach(d => { next[d.id] = { id: d.id, ...d.data() }; });
   products = next;
+  fullDataLoaded = true;
   renderCats();
   renderGrid();
   renderCart();
