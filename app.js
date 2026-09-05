@@ -103,6 +103,7 @@ function applyTheme() {
   root.setProperty("--bg", theme.bg || "#f7f7f5");
   root.setProperty("--text", theme.text || "#17181a");
   root.setProperty("--wa", theme.wa || "#22c35e");
+  root.setProperty("--hiw-num", theme.step || theme.brand || "#1f8a4c");
   $("#page-title").textContent = settings.brand || "Primera Mano";
   $("#brand-name").textContent = settings.brand || "Primera Mano";
   $("#hero-title").textContent = settings.brand || "Primera Mano";
@@ -995,6 +996,8 @@ function fillConfigForm() {
   $("#cfg-color-text-hex").textContent = theme.text || "#17181a";
   $("#cfg-color-wa").value = theme.wa || "#22c35e";
   $("#cfg-color-wa-hex").textContent = theme.wa || "#22c35e";
+  $("#cfg-color-step").value = theme.step || theme.brand || "#1f8a4c";
+  $("#cfg-color-step-hex").textContent = theme.step || theme.brand || "#1f8a4c";
   if (settings.logo) { $("#preview-logo").src = settings.logo; $("#preview-logo").hidden = false; }
   if (settings.cover) { $("#preview-cover").src = settings.cover; $("#preview-cover").hidden = false; }
 }
@@ -1002,6 +1005,7 @@ $("#cfg-color-brand").oninput = (e) => { $("#cfg-color-brand-hex").textContent =
 $("#cfg-color-bg").oninput = (e) => { $("#cfg-color-bg-hex").textContent = e.target.value; };
 $("#cfg-color-text").oninput = (e) => { $("#cfg-color-text-hex").textContent = e.target.value; };
 $("#cfg-color-wa").oninput = (e) => { $("#cfg-color-wa-hex").textContent = e.target.value; };
+$("#cfg-color-step").oninput = (e) => { $("#cfg-color-step-hex").textContent = e.target.value; };
 
 $("#drop-logo").onclick = () => $("#file-logo").click();
 $("#file-logo").onchange = async (e) => {
@@ -1027,7 +1031,8 @@ $("#save-config-btn").onclick = async () => {
       brand: $("#cfg-color-brand").value,
       bg: $("#cfg-color-bg").value,
       text: $("#cfg-color-text").value,
-      wa: $("#cfg-color-wa").value
+      wa: $("#cfg-color-wa").value,
+      step: $("#cfg-color-step").value
     },
     updatedAt: Date.now()
   };
