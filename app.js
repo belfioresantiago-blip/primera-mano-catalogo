@@ -1,11 +1,23 @@
 // ================================================================
-// Este catálogo NO depende de Firebase para nada — ni para leer, ni para
-// editar. Todo (productos, configuración, fotos) vive como archivos dentro
-// de este mismo repositorio de GitHub. Guardar un cambio = hacer un commit
-// directo al repo con la API de GitHub. Sin cuotas diarias, sin límites
-// externos, sin "Guardando..." colgado: si el commit se hizo, ya quedó
-// fijo para siempre, tal cual como lo dejaste, hasta que vos lo cambies.
+// Este catálogo NO depende de Firebase para leer ni para guardar nada.
+// Todo (productos, configuración, fotos) vive como archivos dentro de este
+// mismo repositorio de GitHub. Guardar un cambio = hacer un commit directo
+// al repo con la API de GitHub. Sin cuotas diarias, sin límites externos,
+// sin "Guardando..." colgado: si el commit se hizo, ya quedó fijo para
+// siempre, tal cual como lo dejaste, hasta que vos lo cambies.
+//
+// Lo ÚNICO que usa Firebase es el login con Google: es solo la llave que
+// decide quién puede VER el modo edición (nada de datos pasa por ahí).
 // ================================================================
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { firebaseConfig, ADMIN_EMAILS } from "./firebase-config.js";
+
+const fbApp = initializeApp(firebaseConfig);
+const auth = getAuth(fbApp);
+const googleProvider = new GoogleAuthProvider();
+let fbUser = null;
+
 const GH_OWNER = "primeramano";
 const GH_REPO = "catalogo";
 const GH_BRANCH = "main";
@@ -662,16 +674,23 @@ function closeProductModal() { $("#pmodal-overlay").classList.remove("open"); }
 // ================================================================
 function renderAuthSlot() {
   const slot = $("#auth-slot");
-  if (!isAdmin) {
-    slot.innerHTML = `<button class="admin-toggle off" id="admin-unlock-btn" title="Modo edición">🔑 Admin</button>`;
-    $("#admin-unlock-btn").onclick = unlockAdmin;
-  } else {
-    slot.innerHTML = `
-      <button class="admin-toggle off" id="admin-toggle-btn">✎ <span>Editar catálogo</span></button>
-      <button class="admin-toggle off" id="admin-lock-btn" title="Salir del modo edición">🔒</button>`;
-    $("#admin-toggle-btn").onclick = openAdminDrawer;
-    $("#admin-lock-btn").onclick = lockAdmin;
+  if (!fbUser) {
+    // Nadie logueado: única opción es iniciar sesión con Google.
+    slot.innerHTML = `<button class="admin-toggle off" id="admin-login-btn" title="Iniciar sesión con Google">🔑 Ingresar</button>`;
+    $("#admin-login-btn").onclick = signInAdmin;
+    return;
   }
+  if (!isAdmin) {
+    // Logueado con Google, pero no es el usuario autorizado para editar.
+    slot.innerHTML = `<button class="admin-toggle off" id="admin-logout-btn" title="Cerrar sesión">🔒 Salir</button>`;
+    $("#admin-logout-btn").onclick = signOutAdmin;
+    return;
+  }
+  slot.innerHTML = `
+    <button class="admin-toggle off" id="admin-toggle-btn">✎ <span>Editar catálogo</span></button>
+    <button class="admin-toggle off" id="admin-lock-btn" title="Cerrar sesión">🔒</button>`;
+  $("#admin-toggle-btn").onclick = openAdminDrawer;
+  $("#admin-lock-btn").onclick = signOutAdmin;
 }
 
 // Verifica que el token guardado realmente tenga permiso de escritura sobre
@@ -685,48 +704,61 @@ async function verifyGhToken() {
   } catch (e) { return false; }
 }
 
-async function unlockAdmin() {
+// Se llama solo después de confirmar que el usuario logueado con Google es
+// el dueño del catálogo (ADMIN_EMAILS). Si ya hay un token de GitHub
+// guardado de antes, lo reutiliza en silencio; si no, lo pide UNA sola vez.
+async function ensureGhAccess() {
+  if (getGhToken()) {
+    const ok = await verifyGhToken();
+    if (ok) { isAdmin = true; return; }
+    clearGhToken();
+  }
   const token = prompt(
-    "Pegá tu token de administrador de GitHub.\n\n" +
-    "Se crea una sola vez en github.com → Settings → Developer settings → " +
-    "Fine-grained tokens, dándole permiso \"Contents: Read and write\" solo " +
-    "sobre el repositorio " + GH_OWNER + "/" + GH_REPO + "."
+    "Pegá tu token de administrador de GitHub (se pide una sola vez en este navegador).\n\n" +
+    "Se crea en github.com → Settings → Developer settings → Fine-grained " +
+    "tokens, dándole permiso \"Contents: Read and write\" solo sobre el " +
+    "repositorio " + GH_OWNER + "/" + GH_REPO + "."
   );
-  if (!token) return;
+  if (!token) { isAdmin = false; return; }
   setGhToken(token.trim());
   toast("Verificando token...");
   const ok = await verifyGhToken();
   if (ok) {
     isAdmin = true;
-    renderAuthSlot();
-    renderGrid();
     toast("Modo edición activado");
   } else {
     clearGhToken();
+    isAdmin = false;
     toast("Ese token no es válido o no tiene permiso de escritura sobre el repositorio", "error");
   }
 }
-function lockAdmin() {
-  clearGhToken();
-  isAdmin = false;
+
+function signInAdmin() {
+  signInWithPopup(auth, googleProvider).catch((e) => {
+    console.error(e);
+    toast("No se pudo iniciar sesión con Google", "error");
+  });
+}
+function signOutAdmin() {
   closeAdminDrawer();
-  renderAuthSlot();
-  renderGrid();
-  toast("Saliste del modo edición");
+  signOut(auth);
 }
 
-// Si ya había un token guardado de una sesión anterior, lo confirmamos en
-// silencio al cargar la página — así el admin no tiene que volver a pegarlo
-// cada vez que entra.
-(async function initAdmin() {
-  renderAuthSlot(); // pinta el botón "Admin" de entrada, haya o no token guardado
-  if (!getGhToken()) return;
-  const ok = await verifyGhToken();
-  isAdmin = ok;
-  if (!ok) clearGhToken();
+// Portón único de acceso: solo tu cuenta de Google (ADMIN_EMAILS) puede
+// activar el modo edición. Cualquier otra persona que abra la página, o que
+// se loguee con otra cuenta, ve el catálogo normal, sin botón de editar.
+renderAuthSlot(); // estado inicial ("Ingresar") mientras Firebase resuelve la sesión
+onAuthStateChanged(auth, async (user) => {
+  fbUser = user;
+  const email = (user && user.email || "").toLowerCase();
+  if (user && ADMIN_EMAILS.map(e => e.toLowerCase()).includes(email)) {
+    await ensureGhAccess();
+  } else {
+    isAdmin = false;
+  }
   renderAuthSlot();
   renderGrid();
-})();
+});
 
 // ================================================================
 // DATOS
