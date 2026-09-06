@@ -1,28 +1,101 @@
-import { firebaseConfig, ADMIN_EMAILS } from "./firebase-config.js";
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-import {
-  getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged
-} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
-import {
-  getFirestore, collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc,
-  writeBatch, getDocs, getDoc, query, limit
-} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
-import {
-  getStorage, ref as storageRef, uploadString, uploadBytes, getDownloadURL, deleteObject
-} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
+// ================================================================
+// Este catálogo NO depende de Firebase para nada — ni para leer, ni para
+// editar. Todo (productos, configuración, fotos) vive como archivos dentro
+// de este mismo repositorio de GitHub. Guardar un cambio = hacer un commit
+// directo al repo con la API de GitHub. Sin cuotas diarias, sin límites
+// externos, sin "Guardando..." colgado: si el commit se hizo, ya quedó
+// fijo para siempre, tal cual como lo dejaste, hasta que vos lo cambies.
+// ================================================================
+const GH_OWNER = "primeramano";
+const GH_REPO = "catalogo";
+const GH_BRANCH = "main";
+const GH_TOKEN_KEY = "pm_gh_token";
 
-// ---------- Firebase init ----------
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const storage = getStorage(app);
-const provider = new GoogleAuthProvider();
+function getGhToken() { try { return localStorage.getItem(GH_TOKEN_KEY) || ""; } catch (e) { return ""; } }
+function setGhToken(t) { try { localStorage.setItem(GH_TOKEN_KEY, t); } catch (e) {} }
+function clearGhToken() { try { localStorage.removeItem(GH_TOKEN_KEY); } catch (e) {} }
+
+function b64EncodeUnicode(str) {
+  return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (m, p1) => String.fromCharCode(parseInt(p1, 16))));
+}
+function b64DecodeUnicode(str) {
+  return decodeURIComponent(atob(str).split("").map(c => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2)).join(""));
+}
+
+async function ghRequest(path, opts = {}) {
+  const token = getGhToken();
+  return fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}${path}`, {
+    ...opts,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      ...(opts.body ? { "Content-Type": "application/json" } : {}),
+      ...(opts.headers || {})
+    }
+  });
+}
+
+async function ghGetJsonFile(path) {
+  const res = await ghRequest(`/contents/${path}?ref=${GH_BRANCH}&_=${Date.now()}`);
+  if (res.status === 404) return { sha: null, data: null };
+  if (!res.ok) throw new Error(`No se pudo leer ${path} de GitHub (código ${res.status})`);
+  const j = await res.json();
+  return { sha: j.sha, data: JSON.parse(b64DecodeUnicode(j.content.replace(/\n/g, ""))) };
+}
+
+async function ghPutJsonFile(path, obj, sha, message) {
+  const content = b64EncodeUnicode(JSON.stringify(obj, null, 2));
+  const res = await ghRequest(`/contents/${path}`, {
+    method: "PUT",
+    body: JSON.stringify({ message, content, branch: GH_BRANCH, ...(sha ? { sha } : {}) })
+  });
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}));
+    throw new Error(j.message || `No se pudo guardar ${path} en GitHub (código ${res.status})`);
+  }
+  return res.json();
+}
+
+// Sube una foto (data-URL ya comprimida) como archivo binario directo al
+// repositorio — reemplaza el archivo si ya existe. Devuelve la ruta relativa
+// (con un ?v= para que el navegador no muestre la foto vieja en caché).
+async function ghPutBinaryFile(path, dataUrl, message) {
+  let sha = null;
+  const head = await ghRequest(`/contents/${path}?ref=${GH_BRANCH}`);
+  if (head.ok) { const j = await head.json(); sha = j.sha; }
+  const base64 = dataUrl.split(",")[1];
+  const res = await ghRequest(`/contents/${path}`, {
+    method: "PUT",
+    body: JSON.stringify({ message, content: base64, branch: GH_BRANCH, ...(sha ? { sha } : {}) })
+  });
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}));
+    throw new Error(j.message || `No se pudo subir la foto a GitHub (código ${res.status})`);
+  }
+  return `${path}?v=${Date.now()}`;
+}
+
+function githubErrorMessage(e) {
+  const s = ((e && e.message) || "").toLowerCase();
+  if (s.includes("401") || s.includes("bad credentials")) {
+    return "No se guardó: tu token de administrador venció o es inválido. Volvé a activar el modo edición.";
+  }
+  if (s.includes("403") || s.includes("rate limit")) {
+    return "No se guardó: GitHub rechazó el pedido (permisos del token o límite momentáneo). Probá de nuevo en un minuto.";
+  }
+  if (s.includes("409") || s.includes("sha")) {
+    return "No se guardó: alguien más (u otra pestaña) guardó un cambio justo antes. Recargá la página y probá de nuevo.";
+  }
+  if (s.includes("failed to fetch") || s.includes("networkerror")) {
+    return "No se guardó: no hay conexión a internet en este momento.";
+  }
+  return "No se guardó. Probá de nuevo en un momento. Detalle: " + (e && e.message ? e.message : "error desconocido");
+}
 
 // ---------- State ----------
 let products = {};        // id -> product
 let settings = {};        // settings/site doc
 let cart = {};             // id -> qty
-let currentUser = null;
 let isAdmin = false;
 let activeCategory = "__home__"; // "__home__" = portada con secciones por categoría
 let searchTerm = "";
@@ -49,32 +122,17 @@ function toast(msg, kind = "ok") {
   clearTimeout(toast._h);
   toast._h = setTimeout(() => t.classList.remove("show"), kind === "error" ? 4200 : 2600);
 }
-// Traduce un error de guardado (Firestore u otro) a un mensaje que explica
-// QUÉ pasó y no deja al usuario adivinando si quedó guardado o no.
-function saveErrorMessage(e) {
-  const s = ((e && (e.code || e.message || "")) + "").toLowerCase();
-  if (s.includes("resource-exhausted") || s.includes("quota") || s.includes("429")) {
-    return "No se guardó: la base de datos gratuita llegó a su límite de uso de hoy. Probá de nuevo más tarde (se restablece cada día).";
-  }
-  if (s.includes("permission") || s.includes("insufficient")) {
-    return "No se guardó: no tenés permiso para editar (revisá que iniciaste sesión con el mail correcto).";
-  }
-  return "No se guardó. Probá de nuevo en un momento.";
-}
 function saveCart() {
   try { localStorage.setItem("pm_cart_v1", JSON.stringify(cart)); } catch (e) {}
 }
 
-// Firestore, cuando está sin cuota o sin conexión, a veces NUNCA rechaza la
-// promesa de guardado — la deja reintentando en segundo plano indefinidamente,
-// y el botón queda trabado en "Guardando..." para siempre. Esta función le
-// pone un límite de tiempo: si no contestó en `ms`, lo tratamos como error
-// de guardado (mismo mensaje claro que usamos para la cuota agotada) en vez
-// de dejar la pantalla colgada.
-function withSaveTimeout(promise, ms = 12000) {
+// Si por lo que sea un pedido a GitHub se cuelga (sin internet, etc.), esto
+// evita que el botón quede trabado en "Guardando..." para siempre: a los
+// `ms` milisegundos lo tratamos como error y se puede reintentar.
+function withSaveTimeout(promise, ms = 15000) {
   return Promise.race([
     promise,
-    new Promise((_, reject) => setTimeout(() => reject({ code: "resource-exhausted", message: "timeout" }), ms))
+    new Promise((_, reject) => setTimeout(() => reject(new Error("Tardó demasiado (timeout)")), ms))
   ]);
 }
 
@@ -604,108 +662,106 @@ function closeProductModal() { $("#pmodal-overlay").classList.remove("open"); }
 // ================================================================
 function renderAuthSlot() {
   const slot = $("#auth-slot");
-  if (!currentUser) {
-    slot.innerHTML = `<button class="google-btn" id="google-signin">
-      <svg width="16" height="16" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.9 18.9 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4c-7.4 0-13.8 4.2-17 10.3.1-.1 -.1-.1 0-.1z"/><path fill="#4CAF50" d="M24 44c5.5 0 10.4-2.1 14.1-5.6l-6.5-5.5C29.6 34.6 26.9 35.5 24 35.5c-5.3 0-9.7-3.4-11.3-8.1l-6.6 5.1C9.9 39.6 16.4 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.2-4.2 5.6l6.5 5.5C40.5 36.6 44 30.9 44 24c0-1.3-.1-2.7-.4-3.5z"/></svg>
-      Ingresar
-    </button>`;
-    $("#google-signin").onclick = () => signInWithPopup(auth, provider).catch(e => toast("No se pudo iniciar sesión"));
-  } else if (!isAdmin) {
-    slot.innerHTML = `<img class="avatar" src="${currentUser.photoURL || ""}" title="${currentUser.email}">`;
+  if (!isAdmin) {
+    slot.innerHTML = `<button class="admin-toggle off" id="admin-unlock-btn" title="Modo edición">🔑 Admin</button>`;
+    $("#admin-unlock-btn").onclick = unlockAdmin;
   } else {
     slot.innerHTML = `
       <button class="admin-toggle off" id="admin-toggle-btn">✎ <span>Editar catálogo</span></button>
-      <img class="avatar" src="${currentUser.photoURL || ""}" title="${currentUser.email}">`;
+      <button class="admin-toggle off" id="admin-lock-btn" title="Salir del modo edición">🔒</button>`;
     $("#admin-toggle-btn").onclick = openAdminDrawer;
+    $("#admin-lock-btn").onclick = lockAdmin;
   }
 }
 
-onAuthStateChanged(auth, (user) => {
-  currentUser = user;
-  isAdmin = !!(user && user.email && ADMIN_EMAILS.includes(user.email));
+// Verifica que el token guardado realmente tenga permiso de escritura sobre
+// este repositorio puntual (y no cualquier token robado o vencido).
+async function verifyGhToken() {
+  try {
+    const res = await ghRequest("");
+    if (!res.ok) return false;
+    const j = await res.json();
+    return !!(j.permissions && j.permissions.push);
+  } catch (e) { return false; }
+}
+
+async function unlockAdmin() {
+  const token = prompt(
+    "Pegá tu token de administrador de GitHub.\n\n" +
+    "Se crea una sola vez en github.com → Settings → Developer settings → " +
+    "Fine-grained tokens, dándole permiso \"Contents: Read and write\" solo " +
+    "sobre el repositorio " + GH_OWNER + "/" + GH_REPO + "."
+  );
+  if (!token) return;
+  setGhToken(token.trim());
+  toast("Verificando token...");
+  const ok = await verifyGhToken();
+  if (ok) {
+    isAdmin = true;
+    renderAuthSlot();
+    renderGrid();
+    toast("Modo edición activado");
+  } else {
+    clearGhToken();
+    toast("Ese token no es válido o no tiene permiso de escritura sobre el repositorio", "error");
+  }
+}
+function lockAdmin() {
+  clearGhToken();
+  isAdmin = false;
+  closeAdminDrawer();
   renderAuthSlot();
-  renderGrid(); // toggles the little edit pencil on cards
-  if (isAdmin) startLiveFirestore(); // el admin edita con datos frescos de Firestore
-});
+  renderGrid();
+  toast("Saliste del modo edición");
+}
+
+// Si ya había un token guardado de una sesión anterior, lo confirmamos en
+// silencio al cargar la página — así el admin no tiene que volver a pegarlo
+// cada vez que entra.
+(async function initAdmin() {
+  if (!getGhToken()) return;
+  const ok = await verifyGhToken();
+  isAdmin = ok;
+  if (!ok) clearGhToken();
+  renderAuthSlot();
+  renderGrid();
+})();
 
 // ================================================================
 // DATOS
 // ================================================================
-// PRODUCTOS: los visitantes NUNCA leen la colección completa de Firestore.
-// La página pública se arma con /data/products.json, que sirve Netlify como
-// archivo estático (gratis, sin límite de lecturas). Esto es lo que evita
-// que el catálogo dependa de la cuota diaria de Firestore. Solo cuando
-// alguien se loguea como admin se activa el listener en tiempo real, para
-// poder editar con datos frescos.
-//
-// DISEÑO/CONFIG (marca, colores, logo, portada, WhatsApp): esto SÍ se lee
-// siempre en vivo desde Firestore para TODOS los visitantes — es un solo
-// documento (una lectura, no 531), así que no pesa nada en la cuota. La
-// ventaja: cualquier cambio de color, foto de portada, logo, etc. que hagas
-// desde "Editar catálogo" se ve al toque para todo el mundo, sin que haga
-// falta volver a publicar nada.
-let liveDataActive = false;   // el listener de productos en Firestore ya arrancó (admin logueado)
-let liveSnapshotReceived = false; // Firestore ya trajo productos reales al menos una vez
-let dataLoaded = false;       // hubo AL MENOS una fuente (estática o Firestore) que ya cargó productos
+// Todo — productos y configuración — se lee de archivos estáticos del
+// propio repositorio (data/products.json, data/settings.json). Sin base de
+// datos externa, sin cuotas: lo único que puede pasar es que GitHub Pages
+// tarde uno o dos minutos en reflejar el último commit, como cualquier sitio
+// estático normal.
+let dataLoaded = false;       // ya se cargaron los productos al menos una vez
 
 async function loadStaticProducts(attempt = 1) {
   try {
     const pRes = await fetch("data/products.json", { cache: "no-store" });
     if (!pRes.ok) throw new Error("bad status " + pRes.status);
-    // Solo lo ignoramos si Firestore YA trajo datos reales (no solo "ya arrancó el listener"),
-    // así nunca se queda esperando una carrera que puede perder.
-    if (!liveSnapshotReceived) {
-      const list = await pRes.json();
-      const next = {};
-      list.forEach(p => { next[p.id] = p; });
-      products = next;
-      dataLoaded = true;
-      renderCats();
-      renderGrid();
-      renderCart();
-      updateTrustCount();
-    }
+    const list = await pRes.json();
+    const next = {};
+    list.forEach(p => { next[p.id] = p; });
+    products = next;
+    dataLoaded = true;
+    renderCats();
+    renderGrid();
+    renderCart();
+    updateTrustCount();
   } catch (err) {
     console.error("static products load", err);
-    if (attempt < 4 && !liveSnapshotReceived) {
+    if (attempt < 4) {
       setTimeout(() => loadStaticProducts(attempt + 1), attempt * 1200);
     }
   }
 }
 loadStaticProducts();
 
-// Config/diseño: se lee de Firestore para todos (un solo doc → costo mínimo).
-// Se pide por REST directo (fetch simple), no con el SDK: el SDK mantiene un
-// canal (WebChannel) persistente y, si a ese canal le cuesta conectar en la
-// red del visitante, el SDK completo queda "offline" y hasta un getDoc()
-// puntual falla — un fetch() común no tiene ese problema, es una lectura
-// HTTPS directa y listo. Alcanza de sobra: no hace falta ver el cambio de
-// color/portada "en vivo" en una pestaña ya abierta, con que se vea en la
-// próxima carga de la página sobra.
-function parseFirestoreValue(v) {
-  if (!v) return null;
-  if ("stringValue" in v) return v.stringValue;
-  if ("integerValue" in v) return Number(v.integerValue);
-  if ("doubleValue" in v) return v.doubleValue;
-  if ("booleanValue" in v) return v.booleanValue;
-  if ("nullValue" in v) return null;
-  if ("mapValue" in v) return parseFirestoreFields(v.mapValue.fields || {});
-  if ("arrayValue" in v) return (v.arrayValue.values || []).map(parseFirestoreValue);
-  return null;
-}
-function parseFirestoreFields(fields) {
-  const out = {};
-  for (const k in fields) out[k] = parseFirestoreValue(fields[k]);
-  return out;
-}
-// La config del catálogo (logo, portada, nombre, whatsapp, colores) se guarda
-// como archivo fijo en data/settings.json — igual que data/products.json —
-// para que NUNCA dependa de la cuota diaria de Firestore. Esto es la fuente
-// de verdad: siempre carga, aunque Firestore esté con el límite superado.
-// Firestore se consulta SOLO como capa opcional "en vivo": si responde bien Y
-// trae un cambio más nuevo que el del archivo fijo, lo usa; si Firestore falla
-// (cuota superada, sin conexión, etc.) el archivo fijo ya se aplicó y el sitio
-// sigue funcionando igual, sin pantalla en blanco ni datos faltantes.
+// La config del catálogo (logo, portada, nombre, whatsapp, colores) vive en
+// data/settings.json, adentro del repo — un archivo estático normal, sin
+// ninguna cuota diaria ni base de datos externa de por medio.
 async function loadSettings() {
   try {
     const res = await fetch("data/settings.json", { cache: "no-store" });
@@ -718,51 +774,8 @@ async function loadSettings() {
   } catch (err) {
     console.error("static settings load", err);
   }
-  try {
-    const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents/settings/site?key=${firebaseConfig.apiKey}`;
-    const res = await fetch(url);
-    if (res.ok) {
-      const json = await res.json();
-      const live = parseFirestoreFields(json.fields || {});
-      if (!settings.updatedAt || (live.updatedAt && live.updatedAt > settings.updatedAt)) {
-        settings = live;
-        applyTheme();
-        renderCart();
-        fillConfigForm();
-      }
-    }
-  } catch (err) {
-    console.error("live settings load (no bloquea el sitio)", err);
-  }
 }
 loadSettings();
-
-let unsubProducts = null;
-function startLiveFirestore() {
-  if (liveDataActive) return;
-  liveDataActive = true;
-  unsubProducts = onSnapshot(collection(db, "products"), (snap) => {
-    const next = {};
-    snap.forEach(d => { next[d.id] = { id: d.id, ...d.data() }; });
-    liveSnapshotReceived = true;
-    // El catálogo público (grilla, categorías, portada) NUNCA se reemplaza por un
-    // snapshot de Firestore con MENOS productos que el catálogo estático ya
-    // cargado — evita que un admin logueado vea el catálogo vacío por una carrera
-    // con el caché local de Firestore (primer snapshot local suele venir vacío).
-    const nextCount = Object.keys(next).length;
-    const curCount = Object.keys(products).length;
-    if (nextCount >= curCount) {
-      products = next;
-      dataLoaded = true;
-      renderCats();
-      renderGrid();
-      renderCart();
-      updateTrustCount();
-    }
-    refreshAdminProductList();
-    maybeShowSeedBanner();
-  }, (err) => { console.error(err); });
-}
 
 // ================================================================
 // ADMIN — drawer, tabs
@@ -796,65 +809,11 @@ async function maybeShowSeedBanner() {
   if (Object.keys(products).length > 0) { banner.hidden = true; return; }
   banner.hidden = false;
 }
-$("#seed-btn").onclick = async () => {
-  $("#seed-btn").disabled = true;
-  $("#seed-progress").textContent = "Descargando catálogo inicial...";
-  try {
-    const res = await fetch("products_seed.json");
-    const items = await res.json();
-    $("#seed-progress").textContent = `Importando ${items.length} productos...`;
-    const chunkSize = 450;
-    for (let i = 0; i < items.length; i += chunkSize) {
-      const chunk = items.slice(i, i + chunkSize);
-      const batch = writeBatch(db);
-      chunk.forEach(p => {
-        const ref = doc(db, "products", p.id);
-        batch.set(ref, {
-          title: p.title, category: p.category, price: p.price,
-          description: p.description || "", img: p.img, imgHi: p.imgHi || p.img
-        });
-      });
-      await batch.commit();
-      $("#seed-progress").textContent = `Importado ${Math.min(i + chunkSize, items.length)} de ${items.length}...`;
-    }
-    if (!settings || !settings.brand) {
-      await setDoc(doc(db, "settings", "site"), {
-        brand: "Primera Mano",
-        description: "Catálogo de productos. Armá tu pedido y enviálo por WhatsApp.",
-        whatsapp: "541159436724",
-        logo: null, cover: null,
-        theme: { brand: "#1f8a4c", bg: "#f7f7f5" }
-      }, { merge: true });
-    }
-    $("#seed-progress").textContent = "¡Listo! Catálogo importado.";
-    toast("Catálogo importado con éxito");
-  } catch (e) {
-    console.error(e);
-    $("#seed-progress").textContent = "Hubo un error importando. Probá de nuevo.";
-    $("#seed-btn").disabled = false;
-  }
-};
-
-// ---------- Botón: optimizar fotos (migrar a Storage) ----------
-$("#migrate-images-btn").onclick = async () => {
-  $("#migrate-images-btn").disabled = true;
-  $("#migrate-progress").hidden = false;
-  $("#migrate-progress").textContent = "Buscando fotos para optimizar...";
-  try {
-    const res = await migrateImagesToStorage((done, total) => {
-      $("#migrate-progress").textContent = `Optimizando fotos... ${done}/${total}`;
-    });
-    $("#migrate-progress").textContent = res.total === 0
-      ? "No había fotos pesadas para optimizar. Todo al día."
-      : `¡Listo! Se optimizaron ${res.done} de ${res.total} productos.`;
-    toast("Optimización completa");
-  } catch (e) {
-    console.error(e);
-    $("#migrate-progress").textContent = "Hubo un error optimizando. Probá de nuevo.";
-  } finally {
-    $("#migrate-images-btn").disabled = false;
-  }
-};
+// El catálogo ya viene con productos cargados de entrada, así que este botón
+// de importación inicial ya no hace falta (queda oculto — ver maybeShowSeedBanner).
+if ($("#seed-btn")) $("#seed-btn").onclick = () => toast("El catálogo ya tiene productos cargados.");
+// Ídem: la migración de fotos a Storage era cosa de Firebase, ya no aplica.
+if ($("#migrate-images-btn")) { $("#migrate-images-btn").hidden = true; }
 
 // ---------- Admin product list ----------
 let adminSearchTerm = "";
@@ -888,8 +847,14 @@ function refreshAdminProductList() {
 
 async function deleteProduct(id) {
   if (!confirm("¿Eliminar este producto del catálogo?")) return;
-  try { await withSaveTimeout(deleteDoc(doc(db, "products", id))); toast("Producto eliminado"); }
-  catch (e) { console.error(e); toast(saveErrorMessage(e), "error"); }
+  try {
+    const { sha, data } = await withSaveTimeout(ghGetJsonFile("data/products.json"));
+    const list = (data || []).filter(p => p.id !== id);
+    await withSaveTimeout(ghPutJsonFile("data/products.json", list, sha, `Eliminar producto ${id}`));
+    delete products[id];
+    renderCats(); renderGrid(); renderCart(); updateTrustCount(); refreshAdminProductList();
+    toast("Producto eliminado y publicado");
+  } catch (e) { console.error(e); toast(githubErrorMessage(e), "error"); }
 }
 
 // ---------- New / edit product modal ----------
@@ -927,58 +892,18 @@ $("#file-product").onchange = async (e) => {
   const files = Array.from(e.target.files).slice(0, Math.max(0, 4 - pendingImages.length));
   e.target.value = "";
   if (!files.length) return;
-  toast("Subiendo fotos...");
+  toast("Procesando fotos...");
   for (const file of files) {
     try {
+      // Se comprime acá nomás (nada se sube todavía); la subida real al
+      // repositorio pasa recién al tocar "Guardar", junto con el resto del producto.
       const dataUrl = await processProductPhoto(file);
-      const url = await uploadImageToStorage(dataUrl, uploadTargetId);
-      pendingImages.push(url);
+      pendingImages.push(dataUrl);
       renderPhotoStrip();
-    } catch (err) { console.error(err); toast("Error subiendo una foto"); }
+    } catch (err) { console.error(err); toast("Error procesando una foto", "error"); }
   }
-  toast("Fotos listas");
+  toast("Fotos listas — no te olvides de Guardar");
 };
-
-// Sube una foto (data-URL ya comprimida) a Firebase Storage y devuelve su URL
-// pública, en vez de guardar el base64 adentro del documento del producto.
-// Esto es lo que mantiene cada documento de Firestore liviano — clave para
-// que el listado cargue rápido y no se corte, aunque haya cientos de fotos.
-async function uploadImageToStorage(dataUrl, productId) {
-  const path = `products/${productId}/${Date.now()}_${Math.random().toString(36).slice(2, 7)}.jpg`;
-  const sRef = storageRef(storage, path);
-  await uploadString(sRef, dataUrl, "data_url");
-  return getDownloadURL(sRef);
-}
-
-// ---------- Migración: fotos base64 viejas -> Firebase Storage ----------
-// Recorre los productos que todavía tienen fotos embebidas (base64) y las
-// sube a Storage, reemplazando el campo images/img/imgHi por URLs livianas.
-async function migrateImagesToStorage(onProgress) {
-  const list = Object.values(products).filter(p =>
-    (p.images && p.images.some(u => typeof u === "string" && u.startsWith("data:"))) ||
-    (typeof p.img === "string" && p.img.startsWith("data:"))
-  );
-  let done = 0;
-  for (const p of list) {
-    try {
-      const imgs = (p.images && p.images.length) ? p.images : (p.img ? [p.img] : []);
-      const newUrls = [];
-      for (const img of imgs) {
-        if (typeof img === "string" && img.startsWith("data:")) {
-          newUrls.push(await uploadImageToStorage(img, p.id));
-        } else {
-          newUrls.push(img);
-        }
-      }
-      if (newUrls.length) {
-        await updateDoc(doc(db, "products", p.id), { images: newUrls, img: newUrls[0], imgHi: newUrls[0] });
-      }
-    } catch (e) { console.error("migrate fail", p.id, e); }
-    done++;
-    if (onProgress) onProgress(done, list.length);
-  }
-  return { total: list.length, done };
-}
 
 $("#p-save").onclick = async () => {
   const title = $("#p-title").value.trim();
@@ -987,25 +912,41 @@ $("#p-save").onclick = async () => {
   const description = $("#p-desc").value.trim();
   if (!title) { toast("Ponele un nombre al producto", "error"); return; }
   if (pendingImages.length === 0) { toast("Subí al menos una foto", "error"); return; }
-  const body = {
-    title, category, price, description,
-    images: pendingImages, img: pendingImages[0], imgHi: pendingImages[0]
-  };
   const btn = $("#p-save");
   const originalLabel = btn.textContent;
   btn.disabled = true; btn.textContent = "Guardando...";
   try {
-    if (editingProductId) {
-      await withSaveTimeout(updateDoc(doc(db, "products", editingProductId), body));
-      toast("Producto actualizado y guardado");
-    } else {
-      await withSaveTimeout(setDoc(doc(db, "products", uploadTargetId), body));
-      toast("Producto agregado y guardado");
+    const id = editingProductId || uploadTargetId;
+    // Sube al repo (como archivo fijo) solo las fotos nuevas — las que ya eran
+    // una ruta/URL (producto existente sin cambios de foto) se dejan igual.
+    const finalImages = [];
+    for (let i = 0; i < pendingImages.length; i++) {
+      const img = pendingImages[i];
+      if (typeof img === "string" && img.startsWith("data:")) {
+        btn.textContent = `Subiendo foto ${i + 1}/${pendingImages.length}...`;
+        const path = await withSaveTimeout(
+          ghPutBinaryFile(`assets/products/${id}-${i}.jpg`, img, `Foto de producto: ${title}`),
+          20000
+        );
+        finalImages.push(path);
+      } else {
+        finalImages.push(img);
+      }
     }
+    btn.textContent = "Guardando...";
+    const body = { id, title, category, price, description, images: finalImages, img: finalImages[0], imgHi: finalImages[0] };
+    const { sha, data } = await withSaveTimeout(ghGetJsonFile("data/products.json"));
+    const list = data || [];
+    const idx = list.findIndex(p => p.id === id);
+    if (idx >= 0) list[idx] = { ...list[idx], ...body }; else list.push(body);
+    await withSaveTimeout(ghPutJsonFile("data/products.json", list, sha, editingProductId ? `Editar producto: ${title}` : `Agregar producto: ${title}`));
+    products[id] = body;
+    renderCats(); renderGrid(); renderCart(); updateTrustCount(); refreshAdminProductList();
+    toast(editingProductId ? "Producto actualizado y publicado" : "Producto agregado y publicado");
     $("#edit-overlay").classList.remove("open");
   } catch (e) {
     console.error(e);
-    toast(saveErrorMessage(e), "error");
+    toast(githubErrorMessage(e), "error");
   } finally {
     btn.disabled = false; btn.textContent = originalLabel;
   }
@@ -1070,21 +1011,30 @@ $("#save-config-btn").onclick = async () => {
     },
     updatedAt: Date.now()
   };
-  if (pendingLogoImage) body.logo = pendingLogoImage;
-  if (pendingCoverImage) body.cover = pendingCoverImage;
   const btn = $("#save-config-btn");
   const originalLabel = btn.textContent;
   btn.disabled = true; btn.textContent = "Guardando...";
   try {
-    await withSaveTimeout(setDoc(doc(db, "settings", "site"), body, { merge: true }));
-    settings = { ...settings, ...body };
+    if (pendingLogoImage) {
+      btn.textContent = "Subiendo logo...";
+      body.logo = await withSaveTimeout(ghPutBinaryFile("assets/logo.jpg", pendingLogoImage, "Actualizar logo"), 20000);
+    }
+    if (pendingCoverImage) {
+      btn.textContent = "Subiendo portada...";
+      body.cover = await withSaveTimeout(ghPutBinaryFile("assets/cover.jpg", pendingCoverImage, "Actualizar portada"), 20000);
+    }
+    btn.textContent = "Guardando...";
+    const { sha, data } = await withSaveTimeout(ghGetJsonFile("data/settings.json"));
+    const merged = { ...(data || {}), ...body };
+    await withSaveTimeout(ghPutJsonFile("data/settings.json", merged, sha, "Actualizar configuración del catálogo"));
+    settings = merged;
     pendingLogoImage = null; pendingCoverImage = null;
     applyTheme();
     renderCart();
-    toast("Cambios guardados correctamente");
+    toast("Cambios guardados y publicados — quedan fijos");
   } catch (e) {
     console.error(e);
-    toast(saveErrorMessage(e), "error");
+    toast(githubErrorMessage(e), "error");
   } finally {
     btn.disabled = false; btn.textContent = originalLabel;
   }
