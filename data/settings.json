@@ -1,15 +1,15 @@
 {
   "brand": "Primera Mano",
-  "description": "Catálogo de Primera Mano: hogar, iluminación, herramientas y más. Armá tu pedido y enviálo por WhatsApp.",
+  "description": "Catálogo de Primera Mano: hogar, iluminación, herramientas y más. Armá tu pedido y enviálo por WhatsApp!\nEnvíos a todo el país + Contraentrega en CABA/GBA",
   "whatsapp": "541159436724",
   "theme": {
     "brand": "#1f8a4c",
     "bg": "#f7f7f5",
     "text": "#17181a",
     "wa": "#22c35e",
-    "step": "#FFD700"
+    "step": "#ffd700"
   },
   "logo": "assets/logo.jpg",
   "cover": "assets/cover.jpg",
-  "updatedAt": 1788700100000
+  "updatedAt": 1788669848869
 }
