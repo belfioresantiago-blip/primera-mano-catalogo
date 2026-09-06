@@ -9,7 +9,7 @@
     "wa": "#22c35e",
     "step": "#FFD700"
   },
-  "logo": null,
-  "cover": null,
-  "updatedAt": 1788700000000
+  "logo": "assets/logo.jpg",
+  "cover": "assets/cover.jpg",
+  "updatedAt": 1788700100000
 }
