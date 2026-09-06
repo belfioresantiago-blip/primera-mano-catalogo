@@ -112,7 +112,8 @@ let isAdmin = false;
 let activeCategory = "__home__"; // "__home__" = portada con secciones por categoría
 let searchTerm = "";
 let editingProductId = null; // null = new product
-let pendingImages = [];       // base64 data-URLs, being edited for the current product (up to 4)
+const MAX_PRODUCT_PHOTOS = 12;
+let pendingImages = [];       // base64 data-URLs, being edited for the current product (up to MAX_PRODUCT_PHOTOS)
 let uploadTargetId = null;    // product id used when creating a brand-new product
 let pendingLogoImage = null;
 let pendingCoverImage = null;
@@ -917,12 +918,14 @@ function renderPhotoStrip() {
     btn.onclick = () => { pendingImages.splice(parseInt(btn.dataset.rm, 10), 1); renderPhotoStrip(); };
   });
   const drop = $("#drop-product");
-  drop.textContent = pendingImages.length >= 4 ? "Máximo 4 fotos" : `Click para subir fotos (hasta 4) — ${pendingImages.length}/4`;
+  drop.textContent = pendingImages.length >= MAX_PRODUCT_PHOTOS
+    ? `Máximo ${MAX_PRODUCT_PHOTOS} fotos`
+    : `Click para subir fotos (hasta ${MAX_PRODUCT_PHOTOS}) — ${pendingImages.length}/${MAX_PRODUCT_PHOTOS}`;
 }
 
-$("#drop-product").onclick = () => { if (pendingImages.length < 4) $("#file-product").click(); };
+$("#drop-product").onclick = () => { if (pendingImages.length < MAX_PRODUCT_PHOTOS) $("#file-product").click(); };
 $("#file-product").onchange = async (e) => {
-  const files = Array.from(e.target.files).slice(0, Math.max(0, 4 - pendingImages.length));
+  const files = Array.from(e.target.files).slice(0, Math.max(0, MAX_PRODUCT_PHOTOS - pendingImages.length));
   e.target.value = "";
   if (!files.length) return;
   toast("Procesando fotos...");
