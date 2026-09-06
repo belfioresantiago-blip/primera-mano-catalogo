@@ -65,6 +65,19 @@ function saveCart() {
   try { localStorage.setItem("pm_cart_v1", JSON.stringify(cart)); } catch (e) {}
 }
 
+// Firestore, cuando está sin cuota o sin conexión, a veces NUNCA rechaza la
+// promesa de guardado — la deja reintentando en segundo plano indefinidamente,
+// y el botón queda trabado en "Guardando..." para siempre. Esta función le
+// pone un límite de tiempo: si no contestó en `ms`, lo tratamos como error
+// de guardado (mismo mensaje claro que usamos para la cuota agotada) en vez
+// de dejar la pantalla colgada.
+function withSaveTimeout(promise, ms = 12000) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject({ code: "resource-exhausted", message: "timeout" }), ms))
+  ]);
+}
+
 function fileToDataUrl(file, maxSize, quality) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -875,7 +888,7 @@ function refreshAdminProductList() {
 
 async function deleteProduct(id) {
   if (!confirm("¿Eliminar este producto del catálogo?")) return;
-  try { await deleteDoc(doc(db, "products", id)); toast("Producto eliminado"); }
+  try { await withSaveTimeout(deleteDoc(doc(db, "products", id))); toast("Producto eliminado"); }
   catch (e) { console.error(e); toast(saveErrorMessage(e), "error"); }
 }
 
@@ -983,10 +996,10 @@ $("#p-save").onclick = async () => {
   btn.disabled = true; btn.textContent = "Guardando...";
   try {
     if (editingProductId) {
-      await updateDoc(doc(db, "products", editingProductId), body);
+      await withSaveTimeout(updateDoc(doc(db, "products", editingProductId), body));
       toast("Producto actualizado y guardado");
     } else {
-      await setDoc(doc(db, "products", uploadTargetId), body);
+      await withSaveTimeout(setDoc(doc(db, "products", uploadTargetId), body));
       toast("Producto agregado y guardado");
     }
     $("#edit-overlay").classList.remove("open");
@@ -1063,7 +1076,7 @@ $("#save-config-btn").onclick = async () => {
   const originalLabel = btn.textContent;
   btn.disabled = true; btn.textContent = "Guardando...";
   try {
-    await setDoc(doc(db, "settings", "site"), body, { merge: true });
+    await withSaveTimeout(setDoc(doc(db, "settings", "site"), body, { merge: true }));
     settings = { ...settings, ...body };
     pendingLogoImage = null; pendingCoverImage = null;
     applyTheme();
