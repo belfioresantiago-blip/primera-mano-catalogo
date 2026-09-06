@@ -719,6 +719,7 @@ function lockAdmin() {
 // silencio al cargar la página — así el admin no tiene que volver a pegarlo
 // cada vez que entra.
 (async function initAdmin() {
+  renderAuthSlot(); // pinta el botón "Admin" de entrada, haya o no token guardado
   if (!getGhToken()) return;
   const ok = await verifyGhToken();
   isAdmin = ok;
