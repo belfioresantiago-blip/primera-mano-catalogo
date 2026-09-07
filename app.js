@@ -87,6 +87,13 @@ async function ghPutBinaryFile(path, dataUrl, message) {
   return `${path}?v=${Date.now()}`;
 }
 
+// ---------- Meta Pixel ----------
+// Envoltorio seguro: si el pixel no cargó (bloqueador de ads, sin conexión),
+// nunca rompe el resto del catálogo.
+function trackMeta(event, params) {
+  try { if (typeof fbq === "function") fbq("track", event, params || {}); } catch (e) {}
+}
+
 function githubErrorMessage(e) {
   const s = ((e && e.message) || "").toLowerCase();
   if (s.includes("401") || s.includes("bad credentials")) {
@@ -424,7 +431,18 @@ function cartLines() {
 }
 function cartCount() { return cartLines().reduce((s, l) => s + l.qty, 0); }
 function cartTotal() { return cartLines().reduce((s, l) => s + l.qty * l.item.price, 0); }
-function addToCart(id, qty) { cart[id] = (cart[id] || 0) + qty; saveCart(); renderCart(); }
+function addToCart(id, qty) {
+  cart[id] = (cart[id] || 0) + qty;
+  saveCart();
+  renderCart();
+  const p = products[id];
+  if (p) {
+    trackMeta("AddToCart", {
+      content_ids: [p.id], content_type: "product", content_name: p.title,
+      content_category: p.category || "", value: p.price * qty, currency: "ARS"
+    });
+  }
+}
 function setQty(id, qty) { if (qty <= 0) delete cart[id]; else cart[id] = qty; saveCart(); renderCart(); }
 
 function renderCart() {
@@ -480,6 +498,10 @@ function renderCartDrawer() {
       <button class="wa-btn" id="cart-continue-btn" ${lines.length === 0 ? "disabled" : ""}>Continuar</button>`;
     $("#cart-continue-btn").onclick = () => {
       if (cartLines().length === 0) return;
+      trackMeta("InitiateCheckout", {
+        content_ids: lines.map(l => l.item.id), content_type: "product",
+        num_items: cartCount(), value: cartTotal(), currency: "ARS"
+      });
       cartStep = "form";
       renderCartDrawer();
     };
@@ -587,6 +609,10 @@ function renderCartDrawer() {
       <div class="total-row"><span>Total estimado</span><span>${fmtARS(cartTotal())}</span></div>
       <a id="wa-btn" class="wa-btn" href="${waOrderLink()}" target="_blank" rel="noopener">Completar pedido en WhatsApp</a>`;
     $("#wa-btn").onclick = () => {
+      trackMeta("Contact", {
+        content_ids: lines.map(l => l.item.id), content_type: "product",
+        num_items: cartCount(), value: cartTotal(), currency: "ARS"
+      });
       setTimeout(() => {
         cart = {};
         saveCart();
@@ -632,6 +658,10 @@ function openProductModal(id) {
   const p = products[id];
   if (!p) return;
   modalQty = 1;
+  trackMeta("ViewContent", {
+    content_ids: [p.id], content_type: "product", content_name: p.title,
+    content_category: p.category || "", value: p.price, currency: "ARS"
+  });
   const imgs = (p.images && p.images.length ? p.images : [p.imgHi || p.img]).filter(Boolean);
   const slider = $("#pmodal-slider");
   slider.scrollLeft = 0;
@@ -1080,10 +1110,15 @@ $("#save-config-btn").onclick = async () => {
 // WIRING — search, cart drawer, product modal, cart badge
 // ================================================================
 let __searchDebounce = null;
+let __searchTrackDebounce = null;
 $("#search-input").oninput = (e) => {
   const val = e.target.value;
   clearTimeout(__searchDebounce);
   __searchDebounce = setTimeout(() => { searchTerm = val; renderGrid(); }, 180);
+  clearTimeout(__searchTrackDebounce);
+  __searchTrackDebounce = setTimeout(() => {
+    if (val.trim().length >= 3) trackMeta("Search", { search_string: val.trim() });
+  }, 900);
 };
 
 $("#back-to-home-inner").onclick = () => { searchTerm = ""; $("#search-input").value = ""; goToCategory("__home__"); };
