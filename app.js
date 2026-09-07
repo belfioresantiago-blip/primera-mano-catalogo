@@ -87,11 +87,36 @@ async function ghPutBinaryFile(path, dataUrl, message) {
   return `${path}?v=${Date.now()}`;
 }
 
-// ---------- Meta Pixel ----------
+// ---------- Meta Pixel + Conversions API ----------
 // Envoltorio seguro: si el pixel no cargó (bloqueador de ads, sin conexión),
-// nunca rompe el resto del catálogo.
+// nunca rompe el resto del catálogo. Cada evento se manda por dos caminos
+// (pixel en el navegador + CAPI del lado del servidor) con el mismo event_id
+// para que Meta los deduplique y no cuente el mismo evento dos veces.
+const META_CAPI_ENDPOINT = "https://primeramano-meta-capi.belfioresantiago.workers.dev";
+
 function trackMeta(event, params) {
-  try { if (typeof fbq === "function") fbq("track", event, params || {}); } catch (e) {}
+  const eventId = (typeof crypto !== "undefined" && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  try {
+    if (typeof fbq === "function") fbq("track", event, params || {}, { eventID: eventId });
+  } catch (e) {}
+
+  try {
+    fetch(META_CAPI_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        event_name: event,
+        event_id: eventId,
+        event_source_url: location.href,
+        user_data: {},
+        custom_data: params || {},
+      }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch (e) {}
 }
 
 function githubErrorMessage(e) {
